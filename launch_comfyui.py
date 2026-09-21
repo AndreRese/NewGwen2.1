@@ -29,12 +29,33 @@ def port_open(port):
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def wait_for(port, timeout=600):
+def log_tail(comfy_dir="ComfyUI", n=40):
+    try:
+        with open(os.path.join(comfy_dir, LOG), encoding="utf-8", errors="replace") as f:
+            return "".join(f.readlines()[-n:])
+    except OSError:
+        return ""
+
+
+def wait_for(port, timeout=600, proc=None, comfy_dir="ComfyUI"):
+    """Poll the port; bail out at once if the server process dies, and print a heartbeat
+    with the last log line every 20 s so a slow start is distinguishable from a hang."""
     t0 = time.time()
+    last_beat = t0
     while time.time() - t0 < timeout:
         if port_open(port):
             return True
+        if proc is not None and proc.poll() is not None:
+            print(f">> ComfyUI exited with code {proc.returncode} during startup. Last log lines:\n")
+            print(log_tail(comfy_dir))
+            return False
+        if time.time() - last_beat >= 20:
+            last_beat = time.time()
+            tail = log_tail(comfy_dir, 1).strip()
+            print(f">> starting ComfyUI... {last_beat - t0:.0f}s  |  {tail[:160]}")
         time.sleep(2)
+    print(f">> ComfyUI did not open :{port} within {timeout}s. Last log lines:\n")
+    print(log_tail(comfy_dir))
     return False
 
 
@@ -85,10 +106,12 @@ def launch(comfy_dir="ComfyUI", lowvram=False, tunnel=False, extra=(), restart=F
             cmd.append("--lowvram")
         cmd += list(extra)
         print(">>", " ".join(cmd))
+        if not os.path.isfile(os.path.join(comfy_dir, "main.py")):
+            sys.exit(f"{comfy_dir}/main.py not found — run setup_colab.sh first (cwd: {os.getcwd()})")
         log = open(os.path.join(comfy_dir, LOG), "w")
-        subprocess.Popen(cmd, cwd=comfy_dir, stdout=log, stderr=subprocess.STDOUT)
-        if not wait_for(PORT):
-            sys.exit(f"ComfyUI did not start — check {comfy_dir}/{LOG}")
+        proc = subprocess.Popen(cmd, cwd=comfy_dir, stdout=log, stderr=subprocess.STDOUT)
+        if not wait_for(PORT, proc=proc, comfy_dir=comfy_dir):
+            sys.exit(f"ComfyUI did not start — full log: {comfy_dir}/{LOG}")
 
     url = URLS["proxy"] = colab_proxy_url(PORT)
     if url:
