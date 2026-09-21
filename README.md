@@ -17,6 +17,7 @@ NewGwen2.1/
 ├── setup_colab.sh                      # ComfyUI master + leejet/ComfyUI-GGUF + deps
 ├── download_models.py                  # GGUF (pick quant) + text encoder + VAE -> ComfyUI/models
 ├── launch_comfyui.py                   # start server, print Colab proxy / cloudflared URL
+├── app_gradio.py                       # Gradio UI on *.gradio.live driving ComfyUI's API + host status
 ├── generate.py                         # headless t2i through the ComfyUI API
 ├── colab_requirements.txt
 ├── packages.txt                        # apt packages
@@ -33,7 +34,7 @@ NewGwen2.1/
 %cd qwen21
 !bash setup_colab.sh
 !python download_models.py --quant Q4_K_M --text-encoder int8
-from launch_comfyui import launch; launch()
+!python app_gradio.py     # ComfyUI canvas (Colab proxy) + Gradio UI (*.gradio.live)
 ```
 
 ## Model files

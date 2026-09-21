@@ -2,8 +2,8 @@
 
 Runs **Qwen-Image 2.1 Uncensored (GGUF)** inside ComfyUI on a Colab GPU. Same idea as the
 Wan2.2 project's `COLAB.md`, but ComfyUI is the app: no Gradio port, you get the ComfyUI
-web UI through Colab's port proxy (or a cloudflared tunnel), plus `generate.py` for
-headless runs from a cell.
+web UI through Colab's port proxy (or a cloudflared tunnel), a Gradio front-end on a
+public `*.gradio.live` link, plus `generate.py` for headless runs from a cell.
 
 The whole thing is also packaged as a notebook: `Qwen_Image_2.1_GGUF_ComfyUI.ipynb`.
 
@@ -60,22 +60,39 @@ ComfyUI/models/
 └── vae/qwen_image_2.1_vae_bf16.safetensors
 ```
 
-## Cell 4 – launch ComfyUI
+## Cell 4 – launch ComfyUI + Gradio
+
+```python
+!python app_gradio.py              # L4 / A100
+# !python app_gradio.py --lowvram  # T4
+# !python app_gradio.py --tunnel   # also a *.trycloudflare.com URL for the canvas
+```
+
+Starts ComfyUI in the background, then a Gradio app with `share=True`. You get:
+
+- **ComfyUI canvas** — `https://….colab.googleusercontent.com` (Colab's port proxy; only
+  works while you're logged into that Colab session). **Workflow → Open** →
+  `qwen_image_2.1_gguf_t2i`, or drag `workflows/qwen_image_2.1_gguf_t2i.json` onto it.
+- **Gradio** — public `https://….gradio.live` URL. Prompt → image through the ComfyUI API,
+  with size / steps / cfg / seed / GGUF & text-encoder dropdowns (read live from ComfyUI),
+  a gallery, and a **ComfyUI host status** panel (version, GPU memory, queue, canvas link,
+  interrupt button). Same idea as the Wan2.2 `app_colab.py`.
+
+Gradio can't tunnel the ComfyUI canvas itself (it needs its own websocket to localhost),
+which is why the canvas stays on the Colab proxy / cloudflared and Gradio drives the API.
+
+ComfyUI only, no Gradio:
 
 ```python
 from launch_comfyui import launch
-launch()                 # L4 / A100
-# launch(lowvram=True)   # T4
-# launch(tunnel=True)    # also print a *.trycloudflare.com URL
+launch()                 # launch(lowvram=True) / launch(tunnel=True)
 ```
-
-Prints a `https://….colab.googleusercontent.com` link (Colab's port proxy — only works
-while you're logged into that Colab session). Open it, then **Workflow → Open** and pick
-`qwen_image_2.1_gguf_t2i`, or drag `workflows/qwen_image_2.1_gguf_t2i.json` onto the canvas.
 
 Logs go to `ComfyUI/comfyui.log` (`!tail -f ComfyUI/comfyui.log`).
 
 ## Cell 5 (optional) – headless generation
+
+(when the launch cell is not blocking, i.e. you used `launch()` instead of `app_gradio.py`)
 
 ```python
 !python generate.py "cinematic portrait, 85mm, film grain" --width 1024 --height 1024 --steps 25

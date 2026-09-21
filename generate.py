@@ -22,7 +22,7 @@ API_JSON = os.path.join(HERE, "workflows", "qwen_image_2.1_gguf_t2i_api.json")
 
 
 def run(prompt, negative="", width=1024, height=1024, steps=25, cfg=1.0, seed=None,
-        gguf=None, host="http://127.0.0.1:8188", out="outputs", timeout=1800):
+        gguf=None, host="http://127.0.0.1:8188", out="outputs", timeout=1800, clip=None):
     with open(API_JSON, encoding="utf-8") as f:
         wf = json.load(f)
 
@@ -33,6 +33,8 @@ def run(prompt, negative="", width=1024, height=1024, steps=25, cfg=1.0, seed=No
     wf["6"]["inputs"].update(steps=steps, cfg=cfg, seed=seed)
     if gguf:
         wf["1"]["inputs"]["unet_name"] = gguf
+    if clip:
+        wf["2"]["inputs"]["clip_name"] = clip
 
     r = requests.post(f"{host}/prompt", json={"prompt": wf})
     r.raise_for_status()
@@ -63,7 +65,7 @@ def run(prompt, negative="", width=1024, height=1024, steps=25, cfg=1.0, seed=No
                 f.write(data)
             saved.append(dst)
     print(f">> done in {time.time() - t0:.0f}s ->", ", ".join(saved))
-    return saved
+    return saved, seed
 
 
 if __name__ == "__main__":
@@ -76,7 +78,8 @@ if __name__ == "__main__":
     ap.add_argument("--cfg", type=float, default=1.0)
     ap.add_argument("--seed", type=int)
     ap.add_argument("--gguf", help="override unet_name, e.g. qwen-image-2.1-Q8_0.gguf")
+    ap.add_argument("--clip", help="override clip_name, e.g. qwen3vl_8b_bf16.safetensors")
     ap.add_argument("--host", default="http://127.0.0.1:8188")
     ap.add_argument("--out", default="outputs")
     a = ap.parse_args()
-    run(a.prompt, a.negative, a.width, a.height, a.steps, a.cfg, a.seed, a.gguf, a.host, a.out)
+    run(a.prompt, a.negative, a.width, a.height, a.steps, a.cfg, a.seed, a.gguf, a.host, a.out, clip=a.clip)

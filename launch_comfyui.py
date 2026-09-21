@@ -20,6 +20,7 @@ import urllib.request
 
 PORT = 8188
 LOG = "comfyui.log"
+URLS = {"proxy": None, "tunnel": None}  # filled by launch(), read by app_gradio
 
 
 def port_open(port):
@@ -75,13 +76,13 @@ def launch(comfy_dir="ComfyUI", lowvram=False, tunnel=False, extra=()):
         if not wait_for(PORT):
             sys.exit(f"ComfyUI did not start — check {comfy_dir}/{LOG}")
 
-    url = colab_proxy_url(PORT)
+    url = URLS["proxy"] = colab_proxy_url(PORT)
     if url:
         print(f"\n>> ComfyUI (Colab proxy): {url}\n")
     else:
         print(f"\n>> ComfyUI: http://127.0.0.1:{PORT}\n")
     if tunnel or not url:
-        t = cloudflared(PORT)
+        t = URLS["tunnel"] = cloudflared(PORT)
         print(f">> ComfyUI (cloudflare):   {t}\n" if t else ">> cloudflared failed to give a URL")
     return url
 
