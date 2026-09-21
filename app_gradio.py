@@ -126,8 +126,8 @@ def build_ui():
     return demo
 
 
-def main(comfy_dir="ComfyUI", lowvram=False, tunnel=False, share=True, port=7860):
-    launch(comfy_dir, lowvram, tunnel)
+def main(comfy_dir="ComfyUI", lowvram=False, tunnel=False, share=True, port=7860, restart=False):
+    launch(comfy_dir, lowvram, tunnel, restart=restart)
     demo = build_ui()
     demo.queue().launch(share=share, server_name="127.0.0.1", server_port=port,
                         allowed_paths=[os.path.abspath(OUT_DIR)])
@@ -140,5 +140,6 @@ if __name__ == "__main__":
     ap.add_argument("--tunnel", action="store_true", help="also open a cloudflared tunnel to ComfyUI")
     ap.add_argument("--no-share", action="store_true", help="don't create a *.gradio.live link")
     ap.add_argument("--port", type=int, default=7860)
+    ap.add_argument("--restart", action="store_true", help="restart a running ComfyUI first")
     a = ap.parse_args()
-    main(a.comfy_dir, a.lowvram, a.tunnel, not a.no_share, a.port)
+    main(a.comfy_dir, a.lowvram, a.tunnel, not a.no_share, a.port, a.restart)

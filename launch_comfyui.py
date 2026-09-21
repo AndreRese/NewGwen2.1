@@ -4,6 +4,7 @@
     python launch_comfyui.py                 # Colab proxy URL (no external tunnel)
     python launch_comfyui.py --tunnel        # also open a cloudflared quick tunnel
     python launch_comfyui.py --lowvram       # T4 / 15 GB cards
+    python launch_comfyui.py --restart       # reload after updating / patching nodes
 
 Run it from a notebook cell with `!python launch_comfyui.py`, or import and call
 `launch()` from the notebook so the proxy link renders as a clickable link.
@@ -61,7 +62,20 @@ def cloudflared(port):
     return None
 
 
-def launch(comfy_dir="ComfyUI", lowvram=False, tunnel=False, extra=()):
+def stop():
+    """Kill whatever is listening on the ComfyUI port (Linux/Colab)."""
+    subprocess.run(["fuser", "-k", f"{PORT}/tcp"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(15):
+        if not port_open(PORT):
+            return True
+        time.sleep(1)
+    return False
+
+
+def launch(comfy_dir="ComfyUI", lowvram=False, tunnel=False, extra=(), restart=False):
+    if restart and port_open(PORT):
+        print(">> stopping running ComfyUI")
+        stop()
     if port_open(PORT):
         print(f">> ComfyUI already listening on :{PORT}")
     else:
@@ -92,5 +106,6 @@ if __name__ == "__main__":
     ap.add_argument("--comfy-dir", default="ComfyUI")
     ap.add_argument("--lowvram", action="store_true")
     ap.add_argument("--tunnel", action="store_true", help="also open a cloudflared tunnel")
+    ap.add_argument("--restart", action="store_true", help="kill a running ComfyUI first (after patches/updates)")
     args, extra = ap.parse_known_args()
-    launch(args.comfy_dir, args.lowvram, args.tunnel, extra)
+    launch(args.comfy_dir, args.lowvram, args.tunnel, extra, restart=args.restart)

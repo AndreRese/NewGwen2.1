@@ -32,7 +32,7 @@ The whole thing is also packaged as a notebook: `Qwen_Image_2.1_GGUF_ComfyUI.ipy
 ```
 
 Clones ComfyUI **master** (the `TextEncodeQwenImage21` node is not in a tagged release yet)
-and the **leejet fork** of ComfyUI-GGUF — as of 2026-09-20 it is the only GGUF loader
+and the **leejet fork** of ComfyUI-GGUF (then applies `patch_gguf_loader.py`, see Notes) — as of 2026-09-20 it is the only GGUF loader
 with Qwen-Image 2.1 support (city96 upstream hasn't merged it). Installs both
 `requirements.txt` files plus `colab_requirements.txt`, and copies the workflow into
 `ComfyUI/user/default/workflows/` so it shows up in the UI's workflow browser.
@@ -118,6 +118,14 @@ import glob; display(Image(sorted(glob.glob("outputs/*.png"))[-1]))
   checkout — re-run it, or `!git -C ComfyUI/custom_nodes/ComfyUI-GGUF pull`.
 - If `TextEncodeQwenImage21` is missing (red node), ComfyUI is too old:
   `!git -C ComfyUI pull`.
+- `Expected weight to be of same shape as normalized_shape, but got weight of shape [136]
+  and normalized_shape = [128]` → the **Q8_0** GGUF was converted with its 1D `norm_q` /
+  `norm_k` weights quantized ([HF discussion #4](https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF/discussions/4);
+  the author is re-uploading). `Q4_K_M` is unaffected. `setup_colab.sh` runs
+  `patch_gguf_loader.py`, which makes the loader dequantize any quantized 1D tensor so the
+  current Q8_0 works; on an already-running session:
+  `!git pull && python patch_gguf_loader.py && python launch_comfyui.py --restart`
+  (or `app_gradio.py --restart`).
 - OOM on T4: use `launch(lowvram=True)`, stay at 1024² and `Q4_K_M`; try `--text-encoder w4a8`.
 - Colab's proxy URL sometimes 403s after idle — re-run Cell 4 (it won't restart the
   server, just reprints the link) or use `tunnel=True`.

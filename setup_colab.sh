@@ -28,6 +28,8 @@ if [ ! -d "$GGUF_DIR/.git" ]; then
 else
   git -C "$GGUF_DIR" pull -q --ff-only
 fi
+# Q8_0 has quantized 1D norm weights -> make the loader dequantize them (see patch_gguf_loader.py)
+python "$HERE/patch_gguf_loader.py" --comfy-dir "$COMFY_DIR"
 
 echo ">> python deps"
 pip install -q -r "$COMFY_DIR/requirements.txt"
