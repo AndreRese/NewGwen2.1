@@ -4,17 +4,22 @@
 Text to image:
     python generate.py "a cat wearing a spacesuit, studio photo"
     python generate.py "..." --width 2048 --height 2048 --steps 40 --seed 42 --out outputs/
+    python generate.py "..." --count 5                      # 5 images, seeds seed..seed+4
+    python generate.py "..." --model qwen_image_2.1_bf16.safetensors   # original weights (UNETLoader)
 
 Image edit (image_1 is the edit target, the rest are references; use <image1>, <image2> in the prompt):
     python generate.py "Keep <image1> unchanged, put the shirt from <image2> on her" --image a.png --image b.png
     python generate.py "make it night" --image a.png --resolution 1024 --cache-dtype int8
 
 Loads workflows/qwen_image_2.1_gguf_{t2i,edit}_api.json, patches the inputs, POSTs to
-/prompt, waits for the job and copies the PNGs to --out.
+/prompt, waits for the job and copies the PNGs to --out. --model picks the diffusion file:
+*.gguf goes through UnetLoaderGGUF, *.safetensors (the unquantized originals) through the
+stock UNETLoader. --count N queues N jobs with consecutive seeds (same VRAM, N x time).
 """
 import argparse
 import json
 import os
+import copy
 import random
 import sys
 import time
@@ -41,25 +46,33 @@ def upload_image(path, host=DEFAULT_HOST):
     return f"{j['subfolder']}/{j['name']}" if j.get("subfolder") else j["name"]
 
 
-def submit(wf, host=DEFAULT_HOST, out="outputs", timeout=1800):
-    """Queue an API-format workflow, wait for it, download its images. Returns list of paths."""
+class ComfyError(RuntimeError):
+    pass
+
+
+def queue_prompt(wf, host=DEFAULT_HOST):
+    """POST an API-format workflow; returns its prompt_id."""
     r = requests.post(f"{host}/prompt", json={"prompt": wf})
     if r.status_code != 200:
-        sys.exit(f"ComfyUI rejected the prompt ({r.status_code}):\n{r.text[:2000]}")
+        raise ComfyError(f"ComfyUI rejected the prompt ({r.status_code}):\n{r.text[:2000]}")
     pid = r.json()["prompt_id"]
     print(f">> queued {pid}")
+    return pid
 
+
+def wait_prompt(pid, host=DEFAULT_HOST, out="outputs", timeout=1800):
+    """Wait for a queued prompt and download its images. Returns list of paths."""
     t0 = time.time()
     while time.time() - t0 < timeout:
         hist = requests.get(f"{host}/history/{pid}").json().get(pid)
         if hist:
             status = hist.get("status", {})
             if status.get("status_str") == "error":
-                sys.exit("ComfyUI reported an error:\n" + json.dumps(status, indent=2)[:2000])
+                raise ComfyError("ComfyUI reported an error:\n" + json.dumps(status, indent=2)[:2000])
             break
         time.sleep(2)
     else:
-        sys.exit("timed out waiting for ComfyUI")
+        raise ComfyError("timed out waiting for ComfyUI")
 
     os.makedirs(out, exist_ok=True)
     saved = []
@@ -76,14 +89,48 @@ def submit(wf, host=DEFAULT_HOST, out="outputs", timeout=1800):
     return saved
 
 
+def submit(wf, host=DEFAULT_HOST, out="outputs", timeout=1800):
+    """Queue one workflow, wait for it, download its images. Returns list of paths."""
+    return wait_prompt(queue_prompt(wf, host), host, out, timeout)
+
+
+def submit_many(wf, seed, count, host=DEFAULT_HOST, out="outputs", timeout=1800, progress=None):
+    """Queue `count` copies of wf with seeds seed, seed+1, ... all at once (ComfyUI keeps the
+    model loaded between them), then collect their images in order. progress(done, total)
+    is called after each finished image."""
+    pids = []
+    for i in range(count):
+        w = copy.deepcopy(wf)
+        w["6"]["inputs"]["seed"] = (seed + i) % 2**32
+        pids.append(queue_prompt(w, host))
+    files = []
+    for i, pid in enumerate(pids):
+        files += wait_prompt(pid, host, out, timeout)
+        if progress:
+            progress(i + 1, count)
+    return files
+
+
 def _seed(seed):
     return random.randint(0, 2**32 - 1) if seed is None else int(seed)
+
+
+def set_model(wf, name):
+    """Point node 1 at a diffusion file: *.gguf -> UnetLoaderGGUF (leejet fork),
+    anything else (the unquantized bf16 / int8 safetensors) -> stock UNETLoader."""
+    if name.endswith(".gguf"):
+        wf["1"] = {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": name}}
+    else:
+        wf["1"] = {"class_type": "UNETLoader", "inputs": {"unet_name": name, "weight_dtype": "default"}}
 
 
 # ---- text to image ------------------------------------------------------------------
 
 def run(prompt, negative="", width=1024, height=1024, steps=25, cfg=1.0, seed=None,
-        gguf=None, host=DEFAULT_HOST, out="outputs", timeout=1800, clip=None):
+        gguf=None, host=DEFAULT_HOST, out="outputs", timeout=1800, clip=None, count=1,
+        model=None, progress=None):
+    """Returns (files, seed). count > 1 makes `count` images with seeds seed, seed+1, ...
+    model: diffusion file name (*.gguf or *.safetensors); `gguf` is the old name for it."""
     with open(T2I_JSON, encoding="utf-8") as f:
         wf = json.load(f)
     seed = _seed(seed)
@@ -91,23 +138,23 @@ def run(prompt, negative="", width=1024, height=1024, steps=25, cfg=1.0, seed=No
     wf["4"]["inputs"]["negative_prompt"] = negative
     wf["5"]["inputs"].update(width=width, height=height)
     wf["6"]["inputs"].update(steps=steps, cfg=cfg, seed=seed)
-    if gguf:
-        wf["1"]["inputs"]["unet_name"] = gguf
+    if model or gguf:
+        set_model(wf, model or gguf)
     if clip:
         wf["2"]["inputs"]["clip_name"] = clip
-    print(f">> t2i seed={seed} {width}x{height} steps={steps} cfg={cfg}")
-    return submit(wf, host, out, timeout), seed
+    print(f">> t2i seed={seed} count={count} {width}x{height} steps={steps} cfg={cfg}")
+    return submit_many(wf, seed, int(count), host, out, timeout, progress), seed
 
 
 # ---- image edit ---------------------------------------------------------------------
 
 def edit(prompt, images, negative="", resolution=0, width=None, height=None, steps=25, cfg=1.0,
          seed=None, gguf=None, clip=None, cache_device="auto", cache_dtype="default",
-         host=DEFAULT_HOST, out="outputs", timeout=1800):
+         host=DEFAULT_HOST, out="outputs", timeout=1800, count=1, model=None, progress=None):
     """images: list of local paths; images[0] is the edit target (canvas size), others are refs.
     resolution: pixel budget for the references (0 = keep own size, 1024 official, up to 2048).
     width/height: force the output canvas instead of following image_1 (keep it close to
-    image_1's resized size or the edit shifts)."""
+    image_1's resized size or the edit shifts). count / model as in run()."""
     images = [p for p in images if p]
     if not images:
         raise ValueError("image edit needs at least one image (image_1 = edit target)")
@@ -135,13 +182,13 @@ def edit(prompt, images, negative="", resolution=0, width=None, height=None, ste
         wf["5"] = {"class_type": "EmptyLatentImage",
                    "inputs": {"width": int(width), "height": int(height), "batch_size": 1}}
         wf["6"]["inputs"]["latent_image"] = ["5", 0]
-    if gguf:
-        wf["1"]["inputs"]["unet_name"] = gguf
+    if model or gguf:
+        set_model(wf, model or gguf)
     if clip:
         wf["2"]["inputs"]["clip_name"] = clip
-    print(f">> edit seed={seed} images={len(images)} resolution={resolution} "
+    print(f">> edit seed={seed} count={count} images={len(images)} resolution={resolution} "
           f"canvas={'image_1' if not (width and height) else f'{width}x{height}'} steps={steps} cfg={cfg}")
-    return submit(wf, host, out, timeout), seed
+    return submit_many(wf, seed, int(count), host, out, timeout, progress), seed
 
 
 if __name__ == "__main__":
@@ -156,16 +203,22 @@ if __name__ == "__main__":
     ap.add_argument("--steps", type=int, default=25)
     ap.add_argument("--cfg", type=float, default=1.0)
     ap.add_argument("--seed", type=int)
-    ap.add_argument("--gguf", help="override unet_name, e.g. qwen-image-2.1-Q8_0.gguf")
+    ap.add_argument("--count", type=int, default=1, help="number of images (seeds seed, seed+1, ...)")
+    ap.add_argument("--model", "--gguf", dest="model",
+                    help="diffusion file: qwen-image-2.1-Q8_0.gguf or qwen_image_2.1_bf16.safetensors")
     ap.add_argument("--clip", help="override clip_name, e.g. qwen3vl_8b_bf16.safetensors")
     ap.add_argument("--cache-device", default="auto", choices=["auto", "gpu", "cpu", "off"])
     ap.add_argument("--cache-dtype", default="default", choices=["default", "int8", "int4"])
     ap.add_argument("--host", default=DEFAULT_HOST)
     ap.add_argument("--out", default="outputs")
     a = ap.parse_args()
-    if a.image:
-        edit(a.prompt, a.image, a.negative, a.resolution, a.width, a.height, a.steps, a.cfg, a.seed,
-             a.gguf, a.clip, a.cache_device, a.cache_dtype, a.host, a.out)
-    else:
-        run(a.prompt, a.negative, a.width or 1024, a.height or 1024, a.steps, a.cfg, a.seed,
-            a.gguf, a.host, a.out, clip=a.clip)
+    try:
+        if a.image:
+            edit(a.prompt, a.image, a.negative, a.resolution, a.width, a.height, a.steps, a.cfg, a.seed,
+                 clip=a.clip, cache_device=a.cache_device, cache_dtype=a.cache_dtype, host=a.host,
+                 out=a.out, count=a.count, model=a.model)
+        else:
+            run(a.prompt, a.negative, a.width or 1024, a.height or 1024, a.steps, a.cfg, a.seed,
+                host=a.host, out=a.out, clip=a.clip, count=a.count, model=a.model)
+    except ComfyError as e:
+        sys.exit(str(e))

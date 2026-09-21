@@ -1,19 +1,19 @@
 {
-  "id": "qwen-image-2.1-gguf-edit",
+  "id": "qwen-image-2.1-full-edit",
   "revision": 0,
   "last_node_id": 11,
   "last_link_id": 12,
   "nodes": [
     {
       "id": 1,
-      "type": "UnetLoaderGGUF",
+      "type": "UNETLoader",
       "pos": [
         40,
         60
       ],
       "size": [
         380,
-        60
+        90
       ],
       "flags": {},
       "order": 0,
@@ -25,6 +25,14 @@
           "link": null,
           "widget": {
             "name": "unet_name"
+          }
+        },
+        {
+          "name": "weight_dtype",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "weight_dtype"
           }
         }
       ],
@@ -39,12 +47,13 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "UnetLoaderGGUF"
+        "Node name for S&R": "UNETLoader"
       },
       "widgets_values": [
-        "qwen-image-2.1-Q4_K_M.gguf"
+        "qwen_image_2.1_bf16.safetensors",
+        "default"
       ],
-      "title": "Unet Loader (GGUF)"
+      "title": "Load Diffusion Model"
     },
     {
       "id": 9,

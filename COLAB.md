@@ -13,7 +13,7 @@ The whole thing is also packaged as a notebook: `Qwen_Image_2.1_GGUF_ComfyUI.ipy
 |---|---|---|---|
 | T4 (free) | 15 GB / 12.7 GB | `Q4_K_M` + `int8` encoder, `--lowvram` | Works but tight — the 9 GB text encoder is mmap'd from disk and offloaded after encoding. Slow (no bf16 on sm75). |
 | L4 | 22.5 GB / 53 GB | `Q4_K_M`…`Q8_0` + `int8` encoder | Sweet spot. Everything stays resident. |
-| A100 40/80 GB | 40–80 GB / 83 GB | `Q8_0` + `bf16` encoder | Fastest; at this point you could also use Comfy-Org's `bf16` safetensors instead of GGUF. |
+| A100 40/80 GB | 40–80 GB / 83 GB | `bf16` original + `bf16` encoder | Fastest and the quality ceiling: `--model bf16` loads the unquantized weights through the stock `UNETLoader`. `int8` (ComfyUI-native int8 of the original, 7.3 GB) also works on L4. |
 
 ## Cell 1 – get the code
 
@@ -40,15 +40,16 @@ with Qwen-Image 2.1 support (city96 upstream hasn't merged it). Installs both
 ## Cell 3 – models (~14 GB for the default combo)
 
 ```python
-!python download_models.py --quant Q4_K_M --text-encoder int8
+!python download_models.py --model Q4_K_M --text-encoder int8
+!python download_models.py --model bf16                 # original, unquantized (14.2 GB)
 ```
 
-No HF token needed — all three files come from `abenzerps/Qwen-Image-2.1-Uncensored-GGUF`,
+No HF token needed — the GGUF, text encoder and VAE come from `abenzerps/Qwen-Image-2.1-Uncensored-GGUF`, the unquantized originals from `Comfy-Org/Qwen-Image-2.1` (same upstream weights — the GGUFs were quantized from them),
 which mirrors the Comfy-Org text encoder and VAE. Options:
 
 | flag | choices | size |
 |---|---|---|
-| `--quant` | `Q4_0` 4.05 GB · **`Q4_K_M` 4.60 GB** · `Q8_0` 7.59 GB (only one is downloaded) | diffusion model |
+| `--model` | GGUF: `Q4_0` 4.05 GB · **`Q4_K_M` 4.60 GB** · `Q8_0` 7.59 GB — originals (Comfy-Org, safetensors): `int8` 7.26 GB · `bf16` 14.2 GB (only one is downloaded; `--quant` still works as an alias) | diffusion model |
 | `--text-encoder` | **`int8`** 9.35 GB · `bf16` 17.5 GB · `w4a8` 6.3 GB (from Comfy-Org, experimental) | Qwen3-VL 8B |
 
 Files land in:
@@ -74,12 +75,16 @@ Starts ComfyUI in the background, then a Gradio app with `share=True`. You get:
   works while you're logged into that Colab session). **Workflow → Open** →
   `qwen_image_2.1_gguf_t2i`, or drag `workflows/qwen_image_2.1_gguf_t2i.json` onto it.
 - **Gradio** — public `https://….gradio.live` URL, two tabs, both through the ComfyUI API:
-  - **Text to Image** — prompt, size (up to 2048² native 2K), steps / cfg / seed.
+  - **Text to Image** — prompt, size (up to 2048² native 2K), steps / cfg / seed, **number of images**
+    (same prompt with seeds seed, seed+1, …, queued back to back — no extra VRAM, N× the time).
   - **Image Edit** — `image_1` is the edit target (its size becomes the canvas), `image_2..4`
     are references; refer to them in the prompt as `<image1>`, `<image2>`, … Reference
     *resolution* is a pixel budget (0 = keep own size, 1024 = official default, up to 2048);
     optional custom canvas; *KV cache precision* `int8` halves the edit cache on tight VRAM.
-  - GGUF & text-encoder dropdowns (read live from ComfyUI), galleries, and a **ComfyUI host
+  - *Number of images* on the edit tab too (pick the best take of the same edit).
+  - Diffusion-model dropdown listing both the GGUF quants and the original safetensors (read live
+    from ComfyUI — `.gguf` → `UnetLoaderGGUF`, `.safetensors` → stock `UNETLoader`), text-encoder
+    dropdown, galleries, and a **ComfyUI host
     status** panel (version, GPU memory, queue, canvas link, interrupt). Same idea as the
     Wan2.2 `app_colab.py`.
 
@@ -102,6 +107,8 @@ Logs go to `ComfyUI/comfyui.log` (`!tail -f ComfyUI/comfyui.log`).
 ```python
 # text to image
 !python generate.py "cinematic portrait, 85mm, film grain" --width 1024 --height 1024 --steps 25
+!python generate.py "..." --count 5 --seed 42                               # seeds 42..46
+!python generate.py "..." --model qwen_image_2.1_bf16.safetensors          # original weights
 # image edit: first --image is the target, the rest are references (<image1>, <image2> in the prompt)
 !python generate.py "Keep <image1> unchanged, put the shirt from <image2> on her" \
     --image target.png --image shirt.png --resolution 1024 --cache-dtype int8
@@ -114,8 +121,10 @@ import glob; display(Image(sorted(glob.glob("outputs/*.png"))[-1]))
 - **cfg 1.0**, `euler` / `simple`, **25 steps** (official pipeline: 40–50). Negative prompt is
   ignored at cfg 1 — raise cfg only if you use one.
 - Native **2K**: 2048×2048 on `EmptyLatentImage`; keep multiples of 32.
-- `CLIPLoader` type must be **`qwen_image`**; the diffusion model goes through
-  **`Unet Loader (GGUF)`**.
+- `CLIPLoader` type must be **`qwen_image`**; a `.gguf` diffusion model goes through
+  **`Unet Loader (GGUF)`**, the original `.safetensors` through the stock **`Load Diffusion Model`**
+  (`UNETLoader`) — `workflows/qwen_image_2.1_bf16_{t2i,edit}.json` are the same graphs with that
+  node. `generate.py` swaps node 1 by file extension, so the API JSONs stay GGUF.
 - Image edit (`workflows/qwen_image_2.1_gguf_edit.json`, mirrors Comfy-Org's official edit
   template): `LoadImage` → `TextEncodeQwenImage21` (`images.image_N` + VAE), up to 16 images;
   `image_1` is the edit target and its `latent` output sets the canvas (use an
@@ -141,5 +150,7 @@ import glob; display(Image(sorted(glob.glob("outputs/*.png"))[-1]))
   `!git pull && python patch_gguf_loader.py && python launch_comfyui.py --restart`
   (or `app_gradio.py --restart`).
 - OOM on T4: use `launch(lowvram=True)`, stay at 1024² and `Q4_K_M`; try `--text-encoder w4a8`.
+  The unquantized `bf16` model (14 GB) needs an L4 or better, and T4 has no bf16 support anyway
+  (ComfyUI falls back to fp16 → possible black images); use `int8` or a GGUF there.
 - Colab's proxy URL sometimes 403s after idle — re-run Cell 4 (it won't restart the
   server, just reprints the link) or use `tunnel=True`.

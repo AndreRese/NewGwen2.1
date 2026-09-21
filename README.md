@@ -1,8 +1,11 @@
 # Qwen-Image 2.1 Uncensored (GGUF) — ComfyUI on Google Colab
 
 ComfyUI setup for [abenzerps/Qwen-Image-2.1-Uncensored-GGUF](https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF),
-a GGUF quant of [Qwen/Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) with no
-safety checker. Text-to-image (native 2K) and image edit via reference images.
+GGUF quants of [Qwen/Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) (built from the
+upstream weights; the repo says a fully uncensored build is still in the works), plus the
+**original unquantized weights** from
+[Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1) (`--model bf16` / `int8`).
+Text-to-image (native 2K, N images per prompt) and image edit via reference images.
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AndreRese/NewGwen2.1/blob/main/Qwen_Image_2.1_GGUF_ComfyUI.ipynb)
 
@@ -16,10 +19,10 @@ NewGwen2.1/
 ├── COLAB.md                            # same steps as prose
 ├── setup_colab.sh                      # ComfyUI master + leejet/ComfyUI-GGUF + deps
 ├── patch_gguf_loader.py                # loader fix for Q8_0's quantized norm weights (run by setup)
-├── download_models.py                  # GGUF (pick quant) + text encoder + VAE -> ComfyUI/models
+├── download_models.py                  # diffusion model (GGUF quant or original safetensors) + text encoder + VAE
 ├── launch_comfyui.py                   # start server, print Colab proxy / cloudflared URL
-├── app_gradio.py                       # Gradio UI on *.gradio.live: Text to Image + Image Edit tabs, host status
-├── generate.py                         # headless t2i (run) and image edit (edit) through the ComfyUI API
+├── app_gradio.py                       # Gradio UI on *.gradio.live: Text to Image + Image Edit tabs, N images, host status
+├── generate.py                         # headless t2i (run) / edit (edit) via the ComfyUI API; --count N, --model
 ├── colab_requirements.txt
 ├── packages.txt                        # apt packages
 └── workflows/
@@ -27,7 +30,9 @@ NewGwen2.1/
     ├── qwen_image_2.1_gguf_t2i_api.json   # … API format, used by generate.run
     ├── qwen_image_2.1_gguf_edit.json      # image edit (LoadImage x2 → TextEncodeQwenImage21) — drag into ComfyUI
     ├── qwen_image_2.1_gguf_edit_api.json  # … API format, used by generate.edit
-    └── build_workflows.py                 # regenerates all four (e.g. --quant Q8_0)
+    ├── qwen_image_2.1_bf16_t2i.json       # same graphs with the stock UNETLoader for the
+    ├── qwen_image_2.1_bf16_edit.json      # … original *.safetensors
+    └── build_workflows.py                 # regenerates all of them (e.g. --quant Q8_0)
 ```
 
 ## Quick start (Colab)
@@ -36,7 +41,7 @@ NewGwen2.1/
 !git clone https://github.com/AndreRese/NewGwen2.1 qwen21
 %cd qwen21
 !bash setup_colab.sh
-!python download_models.py --quant Q4_K_M --text-encoder int8
+!python download_models.py --model Q4_K_M --text-encoder int8     # or --model bf16 for the original
 !python app_gradio.py     # ComfyUI canvas (Colab proxy) + Gradio UI (*.gradio.live)
 ```
 
@@ -44,7 +49,8 @@ NewGwen2.1/
 
 | role | file | size | source |
 |---|---|---|---|
-| diffusion model | `qwen-image-2.1-{Q4_0,Q4_K_M,Q8_0}.gguf` (pick one) | 4.0 / 4.6 / 7.6 GB | abenzerps (uncensored) |
+| diffusion model (GGUF) | `qwen-image-2.1-{Q4_0,Q4_K_M,Q8_0}.gguf` (pick one) | 4.0 / 4.6 / 7.6 GB | abenzerps |
+| diffusion model (original) | `qwen_image_2.1_{int8_convrot,bf16}.safetensors` — unquantized upstream weights, stock `UNETLoader` | 7.3 / 14.2 GB | Comfy-Org |
 | text encoder | `qwen3vl_8b_int8_convrot.safetensors` / `qwen3vl_8b_bf16.safetensors` | 9.4 / 17.5 GB | mirrored from Comfy-Org/Qwen-Image-2.1 |
 | VAE | `qwen_image_2.1_vae_bf16.safetensors` | 0.7 GB | mirrored from Comfy-Org/Qwen-Image-2.1 |
 
@@ -67,7 +73,7 @@ file works; it becomes a no-op once the author re-uploads a fixed Q8_0.
 
 ## Workflow
 
-`UnetLoaderGGUF` → `KSampler` (euler / simple, 25 steps, cfg 1.0) with
+`UnetLoaderGGUF` (or the stock `UNETLoader` for the `.safetensors` originals) → `KSampler` (euler / simple, 25 steps, cfg 1.0) with
 `CLIPLoader(type=qwen_image)` → `TextEncodeQwenImage21` for conditioning,
 `EmptyLatentImage` 1024² (or 2048² for native 2K) and `VAEDecode` → `SaveImage`.
 This is Comfy-Org's official `image_qwen_image_2_1_t2i` template, flattened out of its

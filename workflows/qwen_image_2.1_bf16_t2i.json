@@ -1,19 +1,19 @@
 {
-  "id": "qwen-image-2.1-gguf-edit",
+  "id": "qwen-image-2.1-full-t2i",
   "revision": 0,
-  "last_node_id": 11,
-  "last_link_id": 12,
+  "last_node_id": 9,
+  "last_link_id": 8,
   "nodes": [
     {
       "id": 1,
-      "type": "UnetLoaderGGUF",
+      "type": "UNETLoader",
       "pos": [
         40,
         60
       ],
       "size": [
         380,
-        60
+        90
       ],
       "flags": {},
       "order": 0,
@@ -25,6 +25,14 @@
           "link": null,
           "widget": {
             "name": "unet_name"
+          }
+        },
+        {
+          "name": "weight_dtype",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "weight_dtype"
           }
         }
       ],
@@ -39,74 +47,20 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "UnetLoaderGGUF"
+        "Node name for S&R": "UNETLoader"
       },
       "widgets_values": [
-        "qwen-image-2.1-Q4_K_M.gguf"
-      ],
-      "title": "Unet Loader (GGUF)"
-    },
-    {
-      "id": 9,
-      "type": "QwenImage21Cache",
-      "pos": [
-        40,
-        170
-      ],
-      "size": [
-        380,
-        90
-      ],
-      "flags": {},
-      "order": 8,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 1
-        },
-        {
-          "name": "device",
-          "type": "COMBO",
-          "link": null,
-          "widget": {
-            "name": "device"
-          }
-        },
-        {
-          "name": "dtype",
-          "type": "COMBO",
-          "link": null,
-          "widget": {
-            "name": "dtype"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            2
-          ],
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "QwenImage21Cache"
-      },
-      "widgets_values": [
-        "auto",
+        "qwen_image_2.1_bf16.safetensors",
         "default"
-      ]
+      ],
+      "title": "Load Diffusion Model"
     },
     {
       "id": 2,
       "type": "CLIPLoader",
       "pos": [
         40,
-        310
+        180
       ],
       "size": [
         380,
@@ -146,7 +100,7 @@
           "name": "CLIP",
           "type": "CLIP",
           "links": [
-            3
+            2
           ],
           "slot_index": 0
         }
@@ -165,7 +119,7 @@
       "type": "VAELoader",
       "pos": [
         40,
-        470
+        340
       ],
       "size": [
         380,
@@ -189,8 +143,7 @@
           "name": "VAE",
           "type": "VAE",
           "links": [
-            4,
-            5
+            3
           ],
           "slot_index": 0
         }
@@ -206,12 +159,12 @@
       "id": 4,
       "type": "TextEncodeQwenImage21",
       "pos": [
-        900,
+        470,
         60
       ],
       "size": [
         460,
-        420
+        340
       ],
       "flags": {},
       "order": 3,
@@ -220,12 +173,12 @@
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 3
+          "link": 2
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 4,
+          "link": null,
           "shape": 7
         },
         {
@@ -255,18 +208,6 @@
         {
           "name": "images.image_1",
           "type": "IMAGE",
-          "link": 11,
-          "shape": 7
-        },
-        {
-          "name": "images.image_2",
-          "type": "IMAGE",
-          "link": 12,
-          "shape": 7
-        },
-        {
-          "name": "images.image_3",
-          "type": "IMAGE",
           "link": null,
           "shape": 7
         }
@@ -276,7 +217,7 @@
           "name": "positive",
           "type": "CONDITIONING",
           "links": [
-            6
+            4
           ],
           "slot_index": 0
         },
@@ -284,16 +225,14 @@
           "name": "negative",
           "type": "CONDITIONING",
           "links": [
-            7
+            5
           ],
           "slot_index": 0
         },
         {
           "name": "latent",
           "type": "LATENT",
-          "links": [
-            8
-          ],
+          "links": null,
           "slot_index": 0
         }
       ],
@@ -301,16 +240,75 @@
         "Node name for S&R": "TextEncodeQwenImage21"
       },
       "widgets_values": [
-        "Keep the character and pose in <image1> unchanged, change the background to a sunny beach.",
+        "Cinematic photo of a woman in a red dress standing on a rooftop at dusk, city lights bokeh behind her, 85mm lens, shallow depth of field, film grain.",
         "",
-        0
+        1024
+      ]
+    },
+    {
+      "id": 5,
+      "type": "EmptyLatentImage",
+      "pos": [
+        470,
+        450
+      ],
+      "size": [
+        300,
+        110
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "width",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "width"
+          }
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "height"
+          }
+        },
+        {
+          "name": "batch_size",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "batch_size"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            6
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "EmptyLatentImage"
+      },
+      "widgets_values": [
+        1024,
+        1024,
+        1
       ]
     },
     {
       "id": 6,
       "type": "KSampler",
       "pos": [
-        1410,
+        980,
         60
       ],
       "size": [
@@ -324,22 +322,22 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 2
+          "link": 1
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 6
+          "link": 4
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 7
+          "link": 5
         },
         {
           "name": "latent_image",
           "type": "LATENT",
-          "link": 8
+          "link": 6
         },
         {
           "name": "seed",
@@ -395,7 +393,7 @@
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            9
+            7
           ],
           "slot_index": 0
         }
@@ -417,7 +415,7 @@
       "id": 7,
       "type": "VAEDecode",
       "pos": [
-        1780,
+        1350,
         60
       ],
       "size": [
@@ -431,12 +429,12 @@
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 9
+          "link": 7
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 5
+          "link": 3
         }
       ],
       "outputs": [
@@ -444,7 +442,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            10
+            8
           ],
           "slot_index": 0
         }
@@ -458,7 +456,7 @@
       "id": 8,
       "type": "SaveImage",
       "pos": [
-        1780,
+        1350,
         160
       ],
       "size": [
@@ -472,7 +470,7 @@
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 10
+          "link": 8
         },
         {
           "name": "filename_prefix",
@@ -488,147 +486,31 @@
         "Node name for S&R": "SaveImage"
       },
       "widgets_values": [
-        "Qwen_image_2.1_edit"
+        "Qwen_image_2.1"
       ]
     },
     {
-      "id": 5,
+      "id": 9,
       "type": "MarkdownNote",
       "pos": [
         40,
-        570
+        460
       ],
       "size": [
         380,
-        300
+        260
       ],
       "flags": {},
-      "order": 4,
+      "order": 8,
       "mode": 0,
       "inputs": [],
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "## Qwen-Image 2.1 — Image edit (GGUF)\n\n- **image_1 is the edit target**; image_2… are references. Mention them in the prompt as `<image1>`, `<image2>`, …\n- **Canvas = image_1 size** (the `latent` output of Text Encode). To force another size, feed an `EmptyLatentImage` close to image_1's resized size instead, or the edit shifts.\n- **resolution** = total pixel budget for the references, aspect kept, multiples of 32. `0` = keep each image's own size; official default 1024; up to 2048.\n- Up to 16 reference inputs; add `LoadImage` nodes and drag them into `images.image_N`.\n- `Qwen Image 2.1 Cache`: `dtype int8` halves the KV cache (edits on tight VRAM); `int4` quarters it, less accurate.\n- cfg 1.0 / euler / simple / 25 steps as for t2i.\n"
+        "## Qwen-Image 2.1 Uncensored (GGUF)\n\n- **cfg 1.0** is the official Qwen-Image 2.1 path; the negative prompt is ignored at cfg 1. Raise cfg only if you use a negative.\n- **steps**: 25 is fast; the official pipeline uses 40-50 with euler.\n- Native 2K: set 2048x2048 on EmptyLatentImage (multiples of 32).\n- Text encoder: `CLIPLoader` type must be `qwen_image`.\n- Loader: `Unet Loader (GGUF)` from the **leejet** ComfyUI-GGUF fork for *.gguf; the stock `Load Diffusion Model` (UNETLoader) for the original *.safetensors (bf16 / int8_convrot).\n- Files: abenzerps/Qwen-Image-2.1-Uncensored-GGUF (GGUF) and Comfy-Org/Qwen-Image-2.1 (originals) on HF.\n"
       ],
       "color": "#432",
       "bgcolor": "#653"
-    },
-    {
-      "id": 10,
-      "type": "LoadImage",
-      "pos": [
-        470,
-        60
-      ],
-      "size": [
-        380,
-        340
-      ],
-      "flags": {},
-      "order": 9,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "image",
-          "type": "COMBO",
-          "link": null,
-          "widget": {
-            "name": "image"
-          }
-        },
-        {
-          "name": "upload",
-          "type": "IMAGEUPLOAD",
-          "link": null,
-          "widget": {
-            "name": "upload"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            11
-          ],
-          "slot_index": 0
-        },
-        {
-          "name": "MASK",
-          "type": "MASK",
-          "links": null,
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "LoadImage"
-      },
-      "widgets_values": [
-        "image_1.png",
-        "image"
-      ],
-      "title": "image_1 (edit target)",
-      "color": "#232",
-      "bgcolor": "#353"
-    },
-    {
-      "id": 11,
-      "type": "LoadImage",
-      "pos": [
-        470,
-        440
-      ],
-      "size": [
-        380,
-        340
-      ],
-      "flags": {},
-      "order": 10,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "image",
-          "type": "COMBO",
-          "link": null,
-          "widget": {
-            "name": "image"
-          }
-        },
-        {
-          "name": "upload",
-          "type": "IMAGEUPLOAD",
-          "link": null,
-          "widget": {
-            "name": "upload"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            12
-          ],
-          "slot_index": 0
-        },
-        {
-          "name": "MASK",
-          "type": "MASK",
-          "links": null,
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "LoadImage"
-      },
-      "widgets_values": [
-        "image_2.png",
-        "image"
-      ],
-      "title": "image_2 (reference)"
     }
   ],
   "links": [
@@ -636,20 +518,12 @@
       1,
       1,
       0,
-      9,
-      0,
-      "MODEL"
-    ],
-    [
-      2,
-      9,
-      0,
       6,
       0,
       "MODEL"
     ],
     [
-      3,
+      2,
       2,
       0,
       4,
@@ -657,15 +531,7 @@
       "CLIP"
     ],
     [
-      4,
       3,
-      0,
-      4,
-      1,
-      "VAE"
-    ],
-    [
-      5,
       3,
       0,
       7,
@@ -673,7 +539,7 @@
       "VAE"
     ],
     [
-      6,
+      4,
       4,
       0,
       6,
@@ -681,7 +547,7 @@
       "CONDITIONING"
     ],
     [
-      7,
+      5,
       4,
       1,
       6,
@@ -689,15 +555,15 @@
       "CONDITIONING"
     ],
     [
-      8,
-      4,
-      2,
+      6,
+      5,
+      0,
       6,
       3,
       "LATENT"
     ],
     [
-      9,
+      7,
       6,
       0,
       7,
@@ -705,27 +571,11 @@
       "LATENT"
     ],
     [
-      10,
+      8,
       7,
       0,
       8,
       0,
-      "IMAGE"
-    ],
-    [
-      11,
-      10,
-      0,
-      4,
-      5,
-      "IMAGE"
-    ],
-    [
-      12,
-      11,
-      0,
-      4,
-      6,
       "IMAGE"
     ]
   ],
@@ -733,7 +583,7 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.7,
+      "scale": 0.8,
       "offset": [
         0,
         0

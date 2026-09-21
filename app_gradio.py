@@ -10,6 +10,8 @@ Gradio cannot tunnel the ComfyUI canvas itself (websocket + localhost), so this 
 prompt → image UI driving ComfyUI through its HTTP API (generate.run / generate.edit),
 with a status panel that shows the ComfyUI host URL, GPU memory and queue.
 Tabs: Text to Image · Image Edit (image_1 = target, up to 4 refs, <imageN> in the prompt).
+The diffusion-model dropdown lists both GGUF quants (UnetLoaderGGUF) and the unquantized
+safetensors originals (UNETLoader); "Number of images" queues N seeds back to back.
 """
 import argparse
 import os
@@ -18,11 +20,12 @@ import time
 import gradio as gr
 import requests
 
-from generate import edit, run
+from generate import ComfyError, edit, run
 from launch_comfyui import PORT, URLS as COMFY_URLS, launch
 
 HOST = f"http://127.0.0.1:{PORT}"
 OUT_DIR = "outputs"
+MAX_COUNT = 10
 
 
 # ---- ComfyUI host helpers -----------------------------------------------------------
@@ -36,6 +39,16 @@ def model_choices(node, field):
         return api(f"/object_info/{node}")[node]["input"]["required"][field][0]
     except Exception:
         return []
+
+
+def diffusion_choices():
+    """GGUF quants (leejet loader) + safetensors originals (stock UNETLoader), deduplicated."""
+    seen, out = set(), []
+    for name in model_choices("UnetLoaderGGUF", "unet_name") + model_choices("UNETLoader", "unet_name"):
+        if name not in seen and name.endswith((".gguf", ".safetensors")):
+            seen.add(name)
+            out.append(name)
+    return out
 
 
 def host_status():
@@ -62,45 +75,64 @@ def host_status():
 
 
 def interrupt():
+    """Drop everything still pending (a multi-image batch), then stop the running job."""
+    requests.post(f"{HOST}/queue", json={"clear": True}, timeout=10)
     requests.post(f"{HOST}/interrupt", timeout=10)
-    return "Interrupted."
+    return "Queue cleared + current job interrupted.\n\n" + host_status()
 
 
 # ---- generation ---------------------------------------------------------------------
 
-def _info(seed, extra, t0):
-    return f"seed **{seed}** · {extra} · {time.time() - t0:.0f}s"
+def _info(seed, count, extra, t0):
+    seeds = f"seed **{seed}**" if count == 1 else f"seeds **{seed}–{(seed + count - 1) % 2**32}**"
+    return f"{seeds} · {extra} · {time.time() - t0:.0f}s"
 
 
-def generate_t2i(prompt, negative, width, height, steps, cfg, seed, randomize, gguf, clip,
+def _progress_cb(progress, count):
+    def cb(done, total):
+        progress(done / total, desc=f"{done}/{total} done")
+    return cb if count > 1 else None
+
+
+def generate_t2i(prompt, negative, width, height, steps, cfg, seed, randomize, count, model, clip,
                  progress=gr.Progress()):
     if not prompt.strip():
         raise gr.Error("Prompt is empty.")
-    progress(0, desc="queued")
+    count = int(count)
+    progress(0, desc=f"queued ({count})" if count > 1 else "queued")
     t0 = time.time()
-    files, used_seed = run(prompt, negative, int(width), int(height), int(steps), float(cfg),
-                           None if randomize else int(seed), gguf=gguf or None, clip=clip or None,
-                           host=HOST, out=OUT_DIR)
-    return files, used_seed, _info(used_seed, f"{int(width)}×{int(height)} · {int(steps)} steps · cfg {cfg}", t0)
+    try:
+        files, used_seed = run(prompt, negative, int(width), int(height), int(steps), float(cfg),
+                               None if randomize else int(seed), model=model or None, clip=clip or None,
+                               host=HOST, out=OUT_DIR, count=count, progress=_progress_cb(progress, count))
+    except ComfyError as e:
+        raise gr.Error(str(e))
+    return files, used_seed, _info(used_seed, count, f"{len(files)} image(s) · {int(width)}×{int(height)} · "
+                                                     f"{int(steps)} steps · cfg {cfg} · {model}", t0)
 
 
 def generate_edit(prompt, negative, img1, img2, img3, img4, resolution, custom_size, width, height,
-                  steps, cfg, seed, randomize, cache_dtype, gguf, clip, progress=gr.Progress()):
+                  steps, cfg, seed, randomize, count, cache_dtype, model, clip, progress=gr.Progress()):
     if not prompt.strip():
         raise gr.Error("Prompt is empty.")
     if not img1:
         raise gr.Error("image_1 (the edit target) is required.")
     images = [p for p in (img1, img2, img3, img4) if p]
+    count = int(count)
     progress(0, desc="uploading + queued")
     t0 = time.time()
-    files, used_seed = edit(prompt, images, negative, int(resolution),
-                            int(width) if custom_size else None, int(height) if custom_size else None,
-                            int(steps), float(cfg), None if randomize else int(seed),
-                            gguf=gguf or None, clip=clip or None, cache_dtype=cache_dtype,
-                            host=HOST, out=OUT_DIR)
+    try:
+        files, used_seed = edit(prompt, images, negative, int(resolution),
+                                int(width) if custom_size else None, int(height) if custom_size else None,
+                                int(steps), float(cfg), None if randomize else int(seed),
+                                model=model or None, clip=clip or None, cache_dtype=cache_dtype,
+                                host=HOST, out=OUT_DIR, count=count, progress=_progress_cb(progress, count))
+    except ComfyError as e:
+        raise gr.Error(str(e))
     canvas = f"{int(width)}×{int(height)}" if custom_size else "image_1 size"
-    return files, used_seed, _info(used_seed, f"{len(images)} image(s) · res {int(resolution)} · canvas {canvas} · "
-                                              f"{int(steps)} steps · cfg {cfg}", t0)
+    return files, used_seed, _info(used_seed, count, f"{len(files)} image(s) · {len(images)} input(s) · "
+                                                     f"res {int(resolution)} · canvas {canvas} · "
+                                                     f"{int(steps)} steps · cfg {cfg} · {model}", t0)
 
 
 # ---- UI -----------------------------------------------------------------------------
@@ -112,26 +144,28 @@ def sampler_controls(default_steps=25):
     with gr.Row():
         seed = gr.Number(value=0, precision=0, label="Seed")
         randomize = gr.Checkbox(True, label="Randomize seed")
-    return steps, cfg, seed, randomize
+        count = gr.Slider(1, MAX_COUNT, 1, step=1, label="Number of images (seed, seed+1, …)")
+    return steps, cfg, seed, randomize, count
 
 
 def build_ui():
-    ggufs = model_choices("UnetLoaderGGUF", "unet_name")
+    models = diffusion_choices()
     clips = model_choices("CLIPLoader", "clip_name")
-    default_gguf = next((g for g in ggufs if "Q4_K_M" in g), ggufs[0] if ggufs else None)
+    default_model = next((m for m in models if "Q4_K_M" in m), models[0] if models else None)
     default_clip = next((c for c in clips if "qwen3vl" in c and "int8" in c), clips[0] if clips else None)
 
-    with gr.Blocks(title="Qwen-Image 2.1 Uncensored (GGUF) · ComfyUI") as demo:
-        gr.Markdown("# Qwen-Image 2.1 Uncensored (GGUF) — ComfyUI host")
+    with gr.Blocks(title="Qwen-Image 2.1 (GGUF / original) · ComfyUI") as demo:
+        gr.Markdown("# Qwen-Image 2.1 — ComfyUI host")
 
         with gr.Accordion("ComfyUI host status", open=True):
             status = gr.Markdown(host_status())
             with gr.Row():
                 gr.Button("Refresh status", size="sm").click(host_status, outputs=status)
-                gr.Button("Interrupt current job", size="sm", variant="stop").click(interrupt, outputs=status)
+                gr.Button("Interrupt (clears the queue)", size="sm", variant="stop").click(interrupt, outputs=status)
 
         with gr.Row():
-            gguf = gr.Dropdown(ggufs, value=default_gguf, label="Diffusion model (GGUF)")
+            model = gr.Dropdown(models, value=default_model,
+                                label="Diffusion model (*.gguf = GGUF quant · *.safetensors = original weights)")
             clip = gr.Dropdown(clips, value=default_clip, label="Text encoder")
 
         with gr.Tabs():
@@ -146,15 +180,18 @@ def build_ui():
                         with gr.Row():
                             width = gr.Slider(512, 2048, 1024, step=32, label="Width")
                             height = gr.Slider(512, 2048, 1024, step=32, label="Height")
-                        steps, cfg, seed, randomize = sampler_controls()
+                        steps, cfg, seed, randomize, count = sampler_controls()
                         btn = gr.Button("Generate", variant="primary")
                     with gr.Column(scale=4):
-                        gallery = gr.Gallery(label="Output", columns=1, height=640, object_fit="contain")
+                        gallery = gr.Gallery(label="Output", columns=2, height=640, object_fit="contain")
                         info = gr.Markdown()
-                btn.click(generate_t2i, [prompt, negative, width, height, steps, cfg, seed, randomize, gguf, clip],
+                btn.click(generate_t2i,
+                          [prompt, negative, width, height, steps, cfg, seed, randomize, count, model, clip],
                           [gallery, seed, info])
                 gr.Markdown("Presets: **1K** 1024×1024 · **2K native** 2048×2048 · portrait 1024×1536 · "
-                            "landscape 1536×1024 (multiples of 32). Outputs also land in `ComfyUI/output/`.")
+                            "landscape 1536×1024 (multiples of 32). *Number of images* runs the same prompt "
+                            "with consecutive seeds, one after another (no extra VRAM); the seed box shows the "
+                            "first one. Outputs also land in `ComfyUI/output/`.")
 
             # ---------------------------------------------------------------- image edit
             with gr.Tab("Image Edit"):
@@ -176,20 +213,21 @@ def build_ui():
                             custom_size = gr.Checkbox(False, label="Custom canvas (else follows image_1)")
                             e_width = gr.Slider(512, 2048, 1024, step=32, label="Width")
                             e_height = gr.Slider(512, 2048, 1024, step=32, label="Height")
-                        e_steps, e_cfg, e_seed, e_randomize = sampler_controls()
+                        e_steps, e_cfg, e_seed, e_randomize, e_count = sampler_controls()
                         cache_dtype = gr.Radio(["default", "int8", "int4"], value="default",
                                                label="KV cache precision (int8 halves it — use on T4/15 GB)")
                         e_btn = gr.Button("Edit", variant="primary")
                     with gr.Column(scale=4):
-                        e_gallery = gr.Gallery(label="Output", columns=1, height=640, object_fit="contain")
+                        e_gallery = gr.Gallery(label="Output", columns=2, height=640, object_fit="contain")
                         e_info = gr.Markdown()
                 e_btn.click(generate_edit,
                             [e_prompt, e_negative, img1, img2, img3, img4, resolution, custom_size, e_width, e_height,
-                             e_steps, e_cfg, e_seed, e_randomize, cache_dtype, gguf, clip],
+                             e_steps, e_cfg, e_seed, e_randomize, e_count, cache_dtype, model, clip],
                             [e_gallery, e_seed, e_info])
                 gr.Markdown("image_1 is what gets edited and sets the output size; the others are references "
                             "(clothes, style, a second character…). Keep a custom canvas close to image_1's size "
-                            "or the edit shifts. The ComfyUI canvas workflow `qwen_image_2.1_gguf_edit` takes up to 16 images.")
+                            "or the edit shifts. *Number of images* = the same edit with consecutive seeds, so you "
+                            "can pick the best take. The ComfyUI canvas workflow `qwen_image_2.1_gguf_edit` takes up to 16 images.")
     return demo
 
 

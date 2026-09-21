@@ -1,5 +1,5 @@
 {
-  "id": "qwen-image-2.1-uncensored-gguf-t2i",
+  "id": "qwen-image-2.1-gguf-t2i",
   "revision": 0,
   "last_node_id": 9,
   "last_link_id": 8,
@@ -498,7 +498,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "## Qwen-Image 2.1 Uncensored (GGUF)\n\n- **cfg 1.0** is the official Qwen-Image 2.1 path; the negative prompt is ignored at cfg 1. Raise cfg only if you use a negative.\n- **steps**: 25 is fast; the official pipeline uses 40-50 with euler.\n- Native 2K: set 2048x2048 on EmptyLatentImage (multiples of 32).\n- Text encoder: `CLIPLoader` type must be `qwen_image`.\n- Loader: `Unet Loader (GGUF)` from the **leejet** ComfyUI-GGUF fork.\n- Files: abenzerps/Qwen-Image-2.1-Uncensored-GGUF on HF.\n"
+        "## Qwen-Image 2.1 Uncensored (GGUF)\n\n- **cfg 1.0** is the official Qwen-Image 2.1 path; the negative prompt is ignored at cfg 1. Raise cfg only if you use a negative.\n- **steps**: 25 is fast; the official pipeline uses 40-50 with euler.\n- Native 2K: set 2048x2048 on EmptyLatentImage (multiples of 32).\n- Text encoder: `CLIPLoader` type must be `qwen_image`.\n- Loader: `Unet Loader (GGUF)` from the **leejet** ComfyUI-GGUF fork for *.gguf; the stock `Load Diffusion Model` (UNETLoader) for the original *.safetensors (bf16 / int8_convrot).\n- Files: abenzerps/Qwen-Image-2.1-Uncensored-GGUF (GGUF) and Comfy-Org/Qwen-Image-2.1 (originals) on HF.\n"
       ],
       "color": "#432",
       "bgcolor": "#653"
