@@ -1,0 +1,9 @@
+# runtime / downloads — never commit these
+ComfyUI/
+outputs/
+*.gguf
+*.safetensors
+*.log
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

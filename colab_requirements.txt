@@ -1,0 +1,9 @@
+# Colab requirements for ComfyUI + Qwen-Image 2.1 GGUF.
+# torch / torchvision / torchaudio are NOT pinned on purpose: use whatever CUDA build
+# Colab ships (ComfyUI's own requirements.txt is installed by setup_colab.sh and will
+# keep the preinstalled torch as long as it satisfies the range).
+gguf>=0.13.0
+huggingface_hub>=0.34
+hf_transfer
+requests
+tqdm
