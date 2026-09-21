@@ -3,11 +3,13 @@
 
     python app_gradio.py              # starts ComfyUI if needed, then Gradio with share=True
     python app_gradio.py --lowvram    # T4
+    python app_gradio.py --restart    # reload a running ComfyUI first
     python app_gradio.py --no-share   # local only
 
 Gradio cannot tunnel the ComfyUI canvas itself (websocket + localhost), so this is a
-prompt → image UI driving ComfyUI through its HTTP API (generate.run), with a status
-panel that shows the ComfyUI host URL, GPU memory and queue.
+prompt → image UI driving ComfyUI through its HTTP API (generate.run / generate.edit),
+with a status panel that shows the ComfyUI host URL, GPU memory and queue.
+Tabs: Text to Image · Image Edit (image_1 = target, up to 4 refs, <imageN> in the prompt).
 """
 import argparse
 import os
@@ -16,7 +18,7 @@ import time
 import gradio as gr
 import requests
 
-from generate import run
+from generate import edit, run
 from launch_comfyui import PORT, URLS as COMFY_URLS, launch
 
 HOST = f"http://127.0.0.1:{PORT}"
@@ -66,20 +68,52 @@ def interrupt():
 
 # ---- generation ---------------------------------------------------------------------
 
-def generate(prompt, negative, width, height, steps, cfg, seed, randomize, gguf, clip,
-             progress=gr.Progress()):
+def _info(seed, extra, t0):
+    return f"seed **{seed}** · {extra} · {time.time() - t0:.0f}s"
+
+
+def generate_t2i(prompt, negative, width, height, steps, cfg, seed, randomize, gguf, clip,
+                 progress=gr.Progress()):
     if not prompt.strip():
         raise gr.Error("Prompt is empty.")
-    seed = None if randomize else int(seed)
     progress(0, desc="queued")
     t0 = time.time()
     files, used_seed = run(prompt, negative, int(width), int(height), int(steps), float(cfg),
-                           seed, gguf=gguf or None, clip=clip or None, host=HOST, out=OUT_DIR)
-    info = f"seed **{used_seed}** · {int(width)}×{int(height)} · {int(steps)} steps · cfg {cfg} · {time.time() - t0:.0f}s"
-    return files, used_seed, info
+                           None if randomize else int(seed), gguf=gguf or None, clip=clip or None,
+                           host=HOST, out=OUT_DIR)
+    return files, used_seed, _info(used_seed, f"{int(width)}×{int(height)} · {int(steps)} steps · cfg {cfg}", t0)
+
+
+def generate_edit(prompt, negative, img1, img2, img3, img4, resolution, custom_size, width, height,
+                  steps, cfg, seed, randomize, cache_dtype, gguf, clip, progress=gr.Progress()):
+    if not prompt.strip():
+        raise gr.Error("Prompt is empty.")
+    if not img1:
+        raise gr.Error("image_1 (the edit target) is required.")
+    images = [p for p in (img1, img2, img3, img4) if p]
+    progress(0, desc="uploading + queued")
+    t0 = time.time()
+    files, used_seed = edit(prompt, images, negative, int(resolution),
+                            int(width) if custom_size else None, int(height) if custom_size else None,
+                            int(steps), float(cfg), None if randomize else int(seed),
+                            gguf=gguf or None, clip=clip or None, cache_dtype=cache_dtype,
+                            host=HOST, out=OUT_DIR)
+    canvas = f"{int(width)}×{int(height)}" if custom_size else "image_1 size"
+    return files, used_seed, _info(used_seed, f"{len(images)} image(s) · res {int(resolution)} · canvas {canvas} · "
+                                              f"{int(steps)} steps · cfg {cfg}", t0)
 
 
 # ---- UI -----------------------------------------------------------------------------
+
+def sampler_controls(default_steps=25):
+    with gr.Row():
+        steps = gr.Slider(4, 60, default_steps, step=1, label="Steps (official: 40–50)")
+        cfg = gr.Slider(1.0, 7.0, 1.0, step=0.1, label="CFG (1.0 = official path)")
+    with gr.Row():
+        seed = gr.Number(value=0, precision=0, label="Seed")
+        randomize = gr.Checkbox(True, label="Randomize seed")
+    return steps, cfg, seed, randomize
+
 
 def build_ui():
     ggufs = model_choices("UnetLoaderGGUF", "unet_name")
@@ -97,32 +131,65 @@ def build_ui():
                 gr.Button("Interrupt current job", size="sm", variant="stop").click(interrupt, outputs=status)
 
         with gr.Row():
-            with gr.Column(scale=3):
-                prompt = gr.Textbox(label="Prompt", lines=5,
-                                    value="Cinematic photo of a woman in a red dress on a rooftop at dusk, "
-                                          "city lights bokeh, 85mm lens, shallow depth of field, film grain.")
-                negative = gr.Textbox(label="Negative prompt (ignored while cfg = 1)", lines=2)
-                with gr.Row():
-                    width = gr.Slider(512, 2048, 1024, step=32, label="Width")
-                    height = gr.Slider(512, 2048, 1024, step=32, label="Height")
-                with gr.Row():
-                    steps = gr.Slider(4, 60, 25, step=1, label="Steps (official: 40–50)")
-                    cfg = gr.Slider(1.0, 7.0, 1.0, step=0.1, label="CFG (1.0 = official path)")
-                with gr.Row():
-                    seed = gr.Number(value=0, precision=0, label="Seed")
-                    randomize = gr.Checkbox(True, label="Randomize seed")
-                with gr.Row():
-                    gguf = gr.Dropdown(ggufs, value=default_gguf, label="Diffusion model (GGUF)")
-                    clip = gr.Dropdown(clips, value=default_clip, label="Text encoder")
-                btn = gr.Button("Generate", variant="primary")
-            with gr.Column(scale=4):
-                gallery = gr.Gallery(label="Output", columns=1, height=640, object_fit="contain")
-                info = gr.Markdown()
+            gguf = gr.Dropdown(ggufs, value=default_gguf, label="Diffusion model (GGUF)")
+            clip = gr.Dropdown(clips, value=default_clip, label="Text encoder")
 
-        btn.click(generate, [prompt, negative, width, height, steps, cfg, seed, randomize, gguf, clip],
-                  [gallery, seed, info])
-        gr.Markdown("Presets: **1K** 1024×1024 · **2K native** 2048×2048 · portrait 1024×1536 · "
-                    "landscape 1536×1024 (multiples of 32). Outputs also land in `ComfyUI/output/`.")
+        with gr.Tabs():
+            # ---------------------------------------------------------------- text to image
+            with gr.Tab("Text to Image"):
+                with gr.Row():
+                    with gr.Column(scale=3):
+                        prompt = gr.Textbox(label="Prompt", lines=5,
+                                            value="Cinematic photo of a woman in a red dress on a rooftop at dusk, "
+                                                  "city lights bokeh, 85mm lens, shallow depth of field, film grain.")
+                        negative = gr.Textbox(label="Negative prompt (ignored while cfg = 1)", lines=2)
+                        with gr.Row():
+                            width = gr.Slider(512, 2048, 1024, step=32, label="Width")
+                            height = gr.Slider(512, 2048, 1024, step=32, label="Height")
+                        steps, cfg, seed, randomize = sampler_controls()
+                        btn = gr.Button("Generate", variant="primary")
+                    with gr.Column(scale=4):
+                        gallery = gr.Gallery(label="Output", columns=1, height=640, object_fit="contain")
+                        info = gr.Markdown()
+                btn.click(generate_t2i, [prompt, negative, width, height, steps, cfg, seed, randomize, gguf, clip],
+                          [gallery, seed, info])
+                gr.Markdown("Presets: **1K** 1024×1024 · **2K native** 2048×2048 · portrait 1024×1536 · "
+                            "landscape 1536×1024 (multiples of 32). Outputs also land in `ComfyUI/output/`.")
+
+            # ---------------------------------------------------------------- image edit
+            with gr.Tab("Image Edit"):
+                with gr.Row():
+                    with gr.Column(scale=3):
+                        e_prompt = gr.Textbox(
+                            label="Edit instruction — refer to images as <image1>, <image2>, …", lines=4,
+                            value="Keep the character and pose in <image1> unchanged, change the background to a sunny beach.")
+                        e_negative = gr.Textbox(label="Negative prompt (ignored while cfg = 1)", lines=2)
+                        with gr.Row():
+                            img1 = gr.Image(type="filepath", label="image_1 — edit target (sets the canvas)")
+                            img2 = gr.Image(type="filepath", label="image_2 — reference (optional)")
+                        with gr.Row():
+                            img3 = gr.Image(type="filepath", label="image_3 — reference (optional)")
+                            img4 = gr.Image(type="filepath", label="image_4 — reference (optional)")
+                        resolution = gr.Dropdown([0, 512, 768, 1024, 1536, 2048], value=0,
+                                                 label="Reference resolution (pixel budget; 0 = keep own size, 1024 = official)")
+                        with gr.Row():
+                            custom_size = gr.Checkbox(False, label="Custom canvas (else follows image_1)")
+                            e_width = gr.Slider(512, 2048, 1024, step=32, label="Width")
+                            e_height = gr.Slider(512, 2048, 1024, step=32, label="Height")
+                        e_steps, e_cfg, e_seed, e_randomize = sampler_controls()
+                        cache_dtype = gr.Radio(["default", "int8", "int4"], value="default",
+                                               label="KV cache precision (int8 halves it — use on T4/15 GB)")
+                        e_btn = gr.Button("Edit", variant="primary")
+                    with gr.Column(scale=4):
+                        e_gallery = gr.Gallery(label="Output", columns=1, height=640, object_fit="contain")
+                        e_info = gr.Markdown()
+                e_btn.click(generate_edit,
+                            [e_prompt, e_negative, img1, img2, img3, img4, resolution, custom_size, e_width, e_height,
+                             e_steps, e_cfg, e_seed, e_randomize, cache_dtype, gguf, clip],
+                            [e_gallery, e_seed, e_info])
+                gr.Markdown("image_1 is what gets edited and sets the output size; the others are references "
+                            "(clothes, style, a second character…). Keep a custom canvas close to image_1's size "
+                            "or the edit shifts. The ComfyUI canvas workflow `qwen_image_2.1_gguf_edit` takes up to 16 images.")
     return demo
 
 

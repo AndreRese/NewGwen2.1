@@ -18,14 +18,16 @@ NewGwen2.1/
 ├── patch_gguf_loader.py                # loader fix for Q8_0's quantized norm weights (run by setup)
 ├── download_models.py                  # GGUF (pick quant) + text encoder + VAE -> ComfyUI/models
 ├── launch_comfyui.py                   # start server, print Colab proxy / cloudflared URL
-├── app_gradio.py                       # Gradio UI on *.gradio.live driving ComfyUI's API + host status
-├── generate.py                         # headless t2i through the ComfyUI API
+├── app_gradio.py                       # Gradio UI on *.gradio.live: Text to Image + Image Edit tabs, host status
+├── generate.py                         # headless t2i (run) and image edit (edit) through the ComfyUI API
 ├── colab_requirements.txt
 ├── packages.txt                        # apt packages
 └── workflows/
-    ├── qwen_image_2.1_gguf_t2i.json       # drag into ComfyUI
-    ├── qwen_image_2.1_gguf_t2i_api.json   # used by generate.py
-    └── build_workflows.py                 # regenerates both (e.g. --quant Q8_0)
+    ├── qwen_image_2.1_gguf_t2i.json       # text to image — drag into ComfyUI
+    ├── qwen_image_2.1_gguf_t2i_api.json   # … API format, used by generate.run
+    ├── qwen_image_2.1_gguf_edit.json      # image edit (LoadImage x2 → TextEncodeQwenImage21) — drag into ComfyUI
+    ├── qwen_image_2.1_gguf_edit_api.json  # … API format, used by generate.edit
+    └── build_workflows.py                 # regenerates all four (e.g. --quant Q8_0)
 ```
 
 ## Quick start (Colab)
@@ -70,3 +72,8 @@ file works; it becomes a no-op once the author re-uploads a fixed Q8_0.
 `EmptyLatentImage` 1024² (or 2048² for native 2K) and `VAEDecode` → `SaveImage`.
 This is Comfy-Org's official `image_qwen_image_2_1_t2i` template, flattened out of its
 subgraph, with the loader swapped for GGUF.
+
+**Image edit** (`image_qwen_image_2_1_image_edit` template, same treatment): `LoadImage` →
+`TextEncodeQwenImage21` (`images.image_1…16` + VAE); `image_1` is the edit target and its
+`latent` output sets the canvas; `QwenImage21Cache` (KV cache device / `int8` / `int4`)
+between the GGUF loader and the sampler. Prompt with `<image1>`, `<image2>`, …

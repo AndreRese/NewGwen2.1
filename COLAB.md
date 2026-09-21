@@ -73,10 +73,15 @@ Starts ComfyUI in the background, then a Gradio app with `share=True`. You get:
 - **ComfyUI canvas** — `https://….colab.googleusercontent.com` (Colab's port proxy; only
   works while you're logged into that Colab session). **Workflow → Open** →
   `qwen_image_2.1_gguf_t2i`, or drag `workflows/qwen_image_2.1_gguf_t2i.json` onto it.
-- **Gradio** — public `https://….gradio.live` URL. Prompt → image through the ComfyUI API,
-  with size / steps / cfg / seed / GGUF & text-encoder dropdowns (read live from ComfyUI),
-  a gallery, and a **ComfyUI host status** panel (version, GPU memory, queue, canvas link,
-  interrupt button). Same idea as the Wan2.2 `app_colab.py`.
+- **Gradio** — public `https://….gradio.live` URL, two tabs, both through the ComfyUI API:
+  - **Text to Image** — prompt, size (up to 2048² native 2K), steps / cfg / seed.
+  - **Image Edit** — `image_1` is the edit target (its size becomes the canvas), `image_2..4`
+    are references; refer to them in the prompt as `<image1>`, `<image2>`, … Reference
+    *resolution* is a pixel budget (0 = keep own size, 1024 = official default, up to 2048);
+    optional custom canvas; *KV cache precision* `int8` halves the edit cache on tight VRAM.
+  - GGUF & text-encoder dropdowns (read live from ComfyUI), galleries, and a **ComfyUI host
+    status** panel (version, GPU memory, queue, canvas link, interrupt). Same idea as the
+    Wan2.2 `app_colab.py`.
 
 Gradio can't tunnel the ComfyUI canvas itself (it needs its own websocket to localhost),
 which is why the canvas stays on the Colab proxy / cloudflared and Gradio drives the API.
@@ -95,7 +100,11 @@ Logs go to `ComfyUI/comfyui.log` (`!tail -f ComfyUI/comfyui.log`).
 (when the launch cell is not blocking, i.e. you used `launch()` instead of `app_gradio.py`)
 
 ```python
+# text to image
 !python generate.py "cinematic portrait, 85mm, film grain" --width 1024 --height 1024 --steps 25
+# image edit: first --image is the target, the rest are references (<image1>, <image2> in the prompt)
+!python generate.py "Keep <image1> unchanged, put the shirt from <image2> on her" \
+    --image target.png --image shirt.png --resolution 1024 --cache-dtype int8
 from IPython.display import Image, display
 import glob; display(Image(sorted(glob.glob("outputs/*.png"))[-1]))
 ```
@@ -107,13 +116,18 @@ import glob; display(Image(sorted(glob.glob("outputs/*.png"))[-1]))
 - Native **2K**: 2048×2048 on `EmptyLatentImage`; keep multiples of 32.
 - `CLIPLoader` type must be **`qwen_image`**; the diffusion model goes through
   **`Unet Loader (GGUF)`**.
-- Image edit: the same `TextEncodeQwenImage21` node takes up to 16 reference images
-  (`images.image_1…`) plus the VAE — wire a `LoadImage` into it and use its `latent` output
-  instead of `EmptyLatentImage`.
+- Image edit (`workflows/qwen_image_2.1_gguf_edit.json`, mirrors Comfy-Org's official edit
+  template): `LoadImage` → `TextEncodeQwenImage21` (`images.image_N` + VAE), up to 16 images;
+  `image_1` is the edit target and its `latent` output sets the canvas (use an
+  `EmptyLatentImage` close to that size if you must force one, or the edit shifts).
+  `Qwen Image 2.1 Cache` between loader and sampler sets KV-cache device/precision
+  (`int8` for tight VRAM). Prompt with `<image1>`, `<image2>`, …
 
 ## Notes
 
 - First run: ~14 GB download (5–10 min with `hf_transfer`). Colab disk is fine.
+- Image edit uses more VRAM than t2i (reference latents + KV cache). On T4 use `int8` cache,
+  `resolution` 512–768 and one reference.
 - If the GGUF loader errors with an unknown architecture, `setup_colab.sh` pulled an old
   checkout — re-run it, or `!git -C ComfyUI/custom_nodes/ComfyUI-GGUF pull`.
 - If `TextEncodeQwenImage21` is missing (red node), ComfyUI is too old:

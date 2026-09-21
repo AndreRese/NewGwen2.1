@@ -38,7 +38,7 @@ pip install -q -r "$HERE/colab_requirements.txt"
 
 echo ">> copy workflows into ComfyUI/user/default/workflows"
 mkdir -p "$COMFY_DIR/user/default/workflows"
-cp "$HERE"/workflows/*_t2i.json "$COMFY_DIR/user/default/workflows/" 2>/dev/null || true
+cp "$HERE"/workflows/*_t2i.json "$HERE"/workflows/*_edit.json "$COMFY_DIR/user/default/workflows/" 2>/dev/null || true
 
 python - <<'PY'
 import torch
