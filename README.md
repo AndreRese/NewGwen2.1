@@ -18,7 +18,6 @@ NewGwen2.1/
 ├── Qwen_Image_2.1_GGUF_ComfyUI.ipynb   # Colab notebook (runs the scripts below)
 ├── COLAB.md                            # same steps as prose
 ├── setup_colab.sh                      # ComfyUI master + leejet/ComfyUI-GGUF + deps
-├── patch_gguf_loader.py                # loader fix for Q8_0's quantized norm weights (run by setup)
 ├── download_models.py                  # diffusion model (GGUF quant or original safetensors) + text encoder + VAE
 ├── launch_comfyui.py                   # start server, print Colab proxy / cloudflared URL
 ├── app_gradio.py                       # Gradio UI on *.gradio.live: Text to Image + Image Edit tabs, N images, host status
@@ -61,15 +60,14 @@ The stock `city96/ComfyUI-GGUF` does not know the Qwen-Image 2.1 architecture. T
 produced these quants) added it on 2026-09-20. `setup_colab.sh` pins that fork; switch back
 to upstream once it merges.
 
-## Known issue: Q8_0 norm weights
+## Note: the Q8_0 norm-weight crash (fixed 2026-09-21)
 
-`qwen-image-2.1-Q8_0.gguf` was converted with its 1D `norm_q`/`norm_k` weights stored as
-Q8_0 blocks (128 values → 136 bytes), which crashes `KSampler` with
-`Expected weight … shape [136] and normalized_shape = [128]`
+The first `qwen-image-2.1-Q8_0.gguf` had its 1D `norm_q`/`norm_k` weights stored as Q8_0
+blocks, which crashed `KSampler` with `Expected weight … shape [136] and normalized_shape = [128]`
 ([discussion #4](https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF/discussions/4)).
-`Q4_K_M` is fine. `patch_gguf_loader.py` (run by `setup_colab.sh`) widens the loader's
-"1D tensors shouldn't be quantized" rule from BF16 to every quantized type, so the current
-file works; it becomes a no-op once the author re-uploads a fixed Q8_0.
+Both sides fixed it on 2026-09-21: the HF repo re-uploaded Q8_0 and the leejet loader now
+dequantizes every quantized 1D tensor (`edd981b1`). If you downloaded Q8_0 before that, delete
+`ComfyUI/models/diffusion_models/qwen-image-2.1-Q8_0.gguf` and run the download cell again.
 
 ## Workflow
 

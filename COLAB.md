@@ -32,7 +32,7 @@ The whole thing is also packaged as a notebook: `Qwen_Image_2.1_GGUF_ComfyUI.ipy
 ```
 
 Clones ComfyUI **master** (the `TextEncodeQwenImage21` node is not in a tagged release yet)
-and the **leejet fork** of ComfyUI-GGUF (then applies `patch_gguf_loader.py`, see Notes) — as of 2026-09-20 it is the only GGUF loader
+and the **leejet fork** of ComfyUI-GGUF — as of 2026-09-21 it is the only GGUF loader
 with Qwen-Image 2.1 support (city96 upstream hasn't merged it). Installs both
 `requirements.txt` files plus `colab_requirements.txt`, and copies the workflow into
 `ComfyUI/user/default/workflows/` so it shows up in the UI's workflow browser.
@@ -141,14 +141,11 @@ import glob; display(Image(sorted(glob.glob("outputs/*.png"))[-1]))
   checkout — re-run it, or `!git -C ComfyUI/custom_nodes/ComfyUI-GGUF pull`.
 - If `TextEncodeQwenImage21` is missing (red node), ComfyUI is too old:
   `!git -C ComfyUI pull`.
-- `Expected weight to be of same shape as normalized_shape, but got weight of shape [136]
-  and normalized_shape = [128]` → the **Q8_0** GGUF was converted with its 1D `norm_q` /
-  `norm_k` weights quantized ([HF discussion #4](https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF/discussions/4);
-  the author is re-uploading). `Q4_K_M` is unaffected. `setup_colab.sh` runs
-  `patch_gguf_loader.py`, which makes the loader dequantize any quantized 1D tensor so the
-  current Q8_0 works; on an already-running session:
-  `!git pull && python patch_gguf_loader.py && python launch_comfyui.py --restart`
-  (or `app_gradio.py --restart`).
+- `KSampler` fails with `Expected weight to be of same shape as normalized_shape … [136]
+  and normalized_shape = [128]` → you have the first upload of the **Q8_0** GGUF (quantized
+  1D norm weights, [HF discussion #4](https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF/discussions/4)).
+  Fixed on 2026-09-21 on both sides (re-uploaded file + leejet loader `edd981b1`): re-run
+  `setup_colab.sh` (pulls the loader), delete the old `.gguf` and download it again.
 - OOM on T4: use `launch(lowvram=True)`, stay at 1024² and `Q4_K_M`; try `--text-encoder w4a8`.
   The unquantized `bf16` model (14 GB) needs an L4 or better, and T4 has no bf16 support anyway
   (ComfyUI falls back to fp16 → possible black images); use `int8` or a GGUF there.
