@@ -1,8 +1,8 @@
 {
   "id": "qwen-image-2.1-gguf-t2i",
   "revision": 0,
-  "last_node_id": 9,
-  "last_link_id": 8,
+  "last_node_id": 10,
+  "last_link_id": 9,
   "nodes": [
     {
       "id": 1,
@@ -91,7 +91,7 @@
           "name": "CLIP",
           "type": "CLIP",
           "links": [
-            2
+            3
           ],
           "slot_index": 0
         }
@@ -134,7 +134,7 @@
           "name": "VAE",
           "type": "VAE",
           "links": [
-            3
+            4
           ],
           "slot_index": 0
         }
@@ -164,7 +164,7 @@
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 2
+          "link": 3
         },
         {
           "name": "vae",
@@ -208,7 +208,7 @@
           "name": "positive",
           "type": "CONDITIONING",
           "links": [
-            4
+            5
           ],
           "slot_index": 0
         },
@@ -216,7 +216,7 @@
           "name": "negative",
           "type": "CONDITIONING",
           "links": [
-            5
+            6
           ],
           "slot_index": 0
         },
@@ -281,7 +281,7 @@
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            6
+            7
           ],
           "slot_index": 0
         }
@@ -313,22 +313,22 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 1
+          "link": 2
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 4
+          "link": 5
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 5
+          "link": 6
         },
         {
           "name": "latent_image",
           "type": "LATENT",
-          "link": 6
+          "link": 7
         },
         {
           "name": "seed",
@@ -384,7 +384,7 @@
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            7
+            8
           ],
           "slot_index": 0
         }
@@ -420,12 +420,12 @@
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 7
+          "link": 8
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 3
+          "link": 4
         }
       ],
       "outputs": [
@@ -433,7 +433,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            8
+            9
           ],
           "slot_index": 0
         }
@@ -461,7 +461,7 @@
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 8
+          "link": 9
         },
         {
           "name": "filename_prefix",
@@ -481,6 +481,62 @@
       ]
     },
     {
+      "id": 10,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        470,
+        600
+      ],
+      "size": [
+        380,
+        90
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 1
+        },
+        {
+          "name": "lora_name",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "lora_name"
+          }
+        },
+        {
+          "name": "strength_model",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "strength_model"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            2
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "widgets_values": [
+        "",
+        1.0
+      ],
+      "title": "LoRA (bypassed — Ctrl+B to enable)"
+    },
+    {
       "id": 9,
       "type": "MarkdownNote",
       "pos": [
@@ -489,7 +545,7 @@
       ],
       "size": [
         380,
-        260
+        300
       ],
       "flags": {},
       "order": 8,
@@ -498,7 +554,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "## Qwen-Image 2.1 Uncensored (GGUF)\n\n- **cfg 1.0** is the official Qwen-Image 2.1 path; the negative prompt is ignored at cfg 1. Raise cfg only if you use a negative.\n- **steps**: 25 is fast; the official pipeline uses 40-50 with euler.\n- Native 2K: set 2048x2048 on EmptyLatentImage (multiples of 32).\n- Text encoder: `CLIPLoader` type must be `qwen_image`.\n- Loader: `Unet Loader (GGUF)` from the **leejet** ComfyUI-GGUF fork for *.gguf; the stock `Load Diffusion Model` (UNETLoader) for *.safetensors (UC fp8 / int8_convrot, base bf16).\n- Files: abenzerps/Qwen-Image-2.1-Uncensored-GGUF (`UC` = uncensored; base quants on its `base` branch) and Comfy-Org/Qwen-Image-2.1 (unquantized base) on HF.\n"
+        "## Qwen-Image 2.1 Uncensored (GGUF)\n\n- **cfg 1.0** is the official Qwen-Image 2.1 path; the negative prompt is ignored at cfg 1. Raise cfg only if you use a negative.\n- **steps**: 25 is fast; the official pipeline uses 40-50 with euler.\n- Native 2K: set 2048x2048 on EmptyLatentImage (multiples of 32).\n- Text encoder: `CLIPLoader` type must be `qwen_image`.\n- Loader: `Unet Loader (GGUF)` from the **leejet** ComfyUI-GGUF fork for *.gguf; the stock `Load Diffusion Model` (UNETLoader) for *.safetensors (UC fp8 / int8_convrot, base bf16).\n- Files: abenzerps/Qwen-Image-2.1-Uncensored-GGUF (`UC` = uncensored; base quants on its `base` branch) and Comfy-Org/Qwen-Image-2.1 (unquantized base) on HF.\n- LoRA: the purple `LoraLoaderModelOnly` node is bypassed — select it, **Ctrl+B**, pick a Qwen-Image 2.1 LoRA from `models/loras`. Chain more by copying it.\n"
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -509,12 +565,20 @@
       1,
       1,
       0,
-      6,
+      10,
       0,
       "MODEL"
     ],
     [
       2,
+      10,
+      0,
+      6,
+      0,
+      "MODEL"
+    ],
+    [
+      3,
       2,
       0,
       4,
@@ -522,7 +586,7 @@
       "CLIP"
     ],
     [
-      3,
+      4,
       3,
       0,
       7,
@@ -530,7 +594,7 @@
       "VAE"
     ],
     [
-      4,
+      5,
       4,
       0,
       6,
@@ -538,7 +602,7 @@
       "CONDITIONING"
     ],
     [
-      5,
+      6,
       4,
       1,
       6,
@@ -546,7 +610,7 @@
       "CONDITIONING"
     ],
     [
-      6,
+      7,
       5,
       0,
       6,
@@ -554,7 +618,7 @@
       "LATENT"
     ],
     [
-      7,
+      8,
       6,
       0,
       7,
@@ -562,7 +626,7 @@
       "LATENT"
     ],
     [
-      8,
+      9,
       7,
       0,
       8,

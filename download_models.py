@@ -6,24 +6,33 @@
     python download_models.py --model BF16              # uncensored, unquantized (BF16 GGUF), 14.2 GB
     python download_models.py --model fp8               # uncensored fp8 safetensors (L4+), 7.1 GB
     python download_models.py --model base-bf16         # upstream base model, unquantized (Comfy-Org)
+    python download_models.py --lora-only --lora https://huggingface.co/user/repo/blob/main/style.safetensors
+    python download_models.py --lora-only --lora "https://civitai.com/api/download/models/123456" --lora-token KEY
 
 Uncensored ("UC") files: main branch of abenzerps/Qwen-Image-2.1-Uncensored-GGUF — the
 upstream weights with the author's fine-tune (LoRA, merged) on top. Plain upstream "base"
 quants: the repo's `base` branch; unquantized base: Comfy-Org/Qwen-Image-2.1. The text
 encoder and VAE are shared by both (abenzerps mirrors Comfy-Org's). No HF token needed.
-Model names are case-insensitive.
+Model names are case-insensitive. LoRAs (--lora URL, repeatable) go to ComfyUI/models/loras;
+only .safetensors is accepted, and they must be Qwen-Image 2.1 LoRAs (1.x / 2.0 ones load
+with "lora key not loaded" warnings and do nothing). Tokens: --lora-token, or the
+CIVITAI_TOKEN / HF_TOKEN environment variables.
 """
 import argparse
 import importlib.metadata
 import importlib.util
 import os
+import re
+import struct
 import sys
+import urllib.parse
 
 # fast downloads — must be set before huggingface_hub is imported
 os.environ.setdefault("HF_XET_HIGH_PERFORMANCE", "1")  # huggingface_hub >= 1.0 (Xet backend)
 if importlib.util.find_spec("hf_transfer") and importlib.metadata.version("huggingface_hub") < "1":
     os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")  # older hub versions
 
+import requests  # noqa: E402
 from huggingface_hub import hf_hub_download  # noqa: E402
 
 REPO = "abenzerps/Qwen-Image-2.1-Uncensored-GGUF"
@@ -69,6 +78,70 @@ def diffusion_file(name):
     return os.path.basename(MODELS[model_key(name)][0])
 
 
+class LoraError(RuntimeError):
+    pass
+
+
+def _direct_url(url):
+    """Hugging Face page links (…/blob/…) -> download links (…/resolve/…)."""
+    return re.sub(r"^(https://huggingface\.co/[^/]+/[^/]+)/blob/", r"\1/resolve/", url.strip())
+
+
+def _safe_name(name):
+    name = os.path.basename(urllib.parse.unquote(name)).strip()
+    return re.sub(r"[^\w.\-+()\[\] ]", "_", name)
+
+
+def download_lora(url, comfy_dir="ComfyUI", name=None, token=None, progress=None):
+    """Download a LoRA into ComfyUI/models/loras and return its file name (what the
+    LoraLoaderModelOnly dropdown shows). Accepts Hugging Face file links (blob or resolve)
+    and direct links such as https://civitai.com/api/download/models/<id>. Only real
+    .safetensors files are kept (pickle formats can run code). progress(done, total) bytes."""
+    url = _direct_url(url)
+    if not url.startswith(("https://", "http://")):
+        raise LoraError(f"not a URL: {url!r}")
+    if token is None:
+        token = os.environ.get("CIVITAI_TOKEN" if "civitai.com" in url else "HF_TOKEN")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}  # requests drops it on cross-host redirects
+    lora_dir = os.path.join(comfy_dir, "models", "loras")
+    os.makedirs(lora_dir, exist_ok=True)
+
+    with requests.get(url, headers=headers, stream=True, timeout=60) as r:
+        if r.status_code in (401, 403):
+            raise LoraError(f"{r.status_code}: this link needs a token (Civitai API key / HF token)")
+        if r.status_code != 200:
+            raise LoraError(f"download failed: HTTP {r.status_code} for {url}")
+        if "text/html" in r.headers.get("content-type", ""):
+            raise LoraError("the link returned a web page, not a file — use the direct download link "
+                            "(Civitai: the download button's URL; HF: the file's link)")
+        if not name:
+            m = re.search(r"filename\*?=(?:UTF-8'')?\"?([^\";]+)", r.headers.get("content-disposition", ""))
+            name = m.group(1) if m else urllib.parse.urlparse(r.url).path
+        name = _safe_name(name)
+        if not name.lower().endswith(".safetensors"):
+            raise LoraError(f"{name!r} is not a .safetensors file — only safetensors LoRAs are accepted")
+        dst = os.path.join(lora_dir, name)
+        total = int(r.headers.get("content-length") or 0)
+        if os.path.isfile(dst) and total and os.path.getsize(dst) == total:
+            print(f">> LoRA {name} already there")
+            return name
+        part, done = dst + ".part", 0
+        with open(part, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1 << 20):
+                f.write(chunk)
+                done += len(chunk)
+                if progress:
+                    progress(done, total)
+    with open(part, "rb") as f:  # safetensors = u64 header length + JSON header
+        head = f.read(9)
+    if len(head) < 9 or head[8:9] != b"{" or struct.unpack("<Q", head[:8])[0] > done:
+        os.remove(part)
+        raise LoraError(f"{name!r} is not a valid safetensors file")
+    os.replace(part, dst)
+    print(f">> LoRA {name} ({done / 1e6:.1f} MB) -> {lora_dir}")
+    return name
+
+
 def fetch(repo, filename, local_dir, revision="main"):
     path = hf_hub_download(repo_id=repo, filename=filename, local_dir=local_dir, revision=revision)
     print(f"   {path}  ({os.path.getsize(path) / 1e9:.2f} GB)")
@@ -83,11 +156,23 @@ def main():
     ap.add_argument("--text-encoder", default="int8", choices=sorted(TEXT_ENCODERS))
     ap.add_argument("--skip-text-encoder", action="store_true")
     ap.add_argument("--skip-vae", action="store_true")
+    ap.add_argument("--lora", action="append", default=[], metavar="URL",
+                    help="also download a LoRA (.safetensors) into models/loras; repeatable")
+    ap.add_argument("--lora-token", help="Civitai API key / HF token for --lora links that need one")
+    ap.add_argument("--lora-only", action="store_true", help="only download the --lora files")
     args = ap.parse_args()
 
     models = os.path.join(args.comfy_dir, "models")
     if not os.path.isdir(models):
         sys.exit(f"{models} not found — run setup_colab.sh first (or pass --comfy-dir)")
+
+    for url in args.lora:
+        try:
+            download_lora(url, args.comfy_dir, token=args.lora_token)
+        except (LoraError, requests.RequestException) as e:
+            sys.exit(f">> LoRA download failed: {e}")
+    if args.lora_only:
+        return
 
     fname, repo, revision, size = MODELS[args.model]
     print(f">> diffusion model {os.path.basename(fname)} (~{size} GB, {repo}@{revision})")

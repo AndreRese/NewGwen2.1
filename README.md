@@ -4,7 +4,7 @@ ComfyUI setup for [abenzerps/Qwen-Image-2.1-Uncensored-GGUF](https://huggingface
 the uncensored (`UC`) fine-tune of [Qwen/Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1)
 (the author's LoRA merged into the upstream weights) as GGUF quants, an unquantized BF16 GGUF
 and fp8 / int8 safetensors. The plain base model stays available (`--model base-*`).
-Text-to-image (native 2K, N images per prompt) and image edit via reference images.
+Text-to-image (native 2K, N images per prompt), image edit via reference images, LoRAs.
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AndreRese/NewGwen2.1/blob/main/Qwen_Image_2.1_GGUF_ComfyUI.ipynb)
 
@@ -17,10 +17,10 @@ NewGwen2.1/
 ├── Qwen_Image_2.1_GGUF_ComfyUI.ipynb   # Colab notebook (runs the scripts below)
 ├── COLAB.md                            # same steps as prose
 ├── setup_colab.sh                      # ComfyUI + leejet/ComfyUI-GGUF at pinned commits + deps
-├── download_models.py                  # diffusion model (UC / base, GGUF or safetensors) + text encoder + VAE
+├── download_models.py                  # diffusion model (UC / base, GGUF or safetensors) + text encoder + VAE + LoRAs by URL
 ├── launch_comfyui.py                   # start server, print Colab proxy / cloudflared URL
-├── app_gradio.py                       # Gradio UI on *.gradio.live: Text to Image + Image Edit tabs, N images, host status
-├── generate.py                         # headless t2i (run) / edit (edit) via the ComfyUI API; --count N, --model
+├── app_gradio.py                       # Gradio UI on *.gradio.live: t2i + edit tabs, N images, Send to Edit, LoRAs, host status
+├── generate.py                         # headless t2i (run) / edit (edit) via the ComfyUI API; --count N, --model, --lora
 ├── colab_requirements.txt
 ├── packages.txt                        # apt packages (none needed at the moment)
 └── workflows/
@@ -57,6 +57,21 @@ NewGwen2.1/
 `*.gguf` loads through `Unet Loader (GGUF)`, `*.safetensors` through the stock `Load Diffusion
 Model` (`UNETLoader`); `generate.py` / the Gradio app pick the loader from the extension.
 The repo also has Q5_K_M / Q6_K; they are left out of the menu on purpose.
+
+## LoRAs
+
+Only **Qwen-Image 2.1** LoRAs work (1.x / 2.0 ones load with `lora key not loaded` in the log and
+change nothing). Put `.safetensors` files in `ComfyUI/models/loras`, or download them by URL:
+
+```python
+!python download_models.py --lora-only --lora https://huggingface.co/<user>/<repo>/blob/main/<file>.safetensors
+!python download_models.py --lora-only --lora "https://civitai.com/api/download/models/<id>" --lora-token <API key>
+```
+
+The Gradio app has 3 LoRA slots (applied to both tabs) and the same download box;
+`generate.py --lora file.safetensors:0.8` (repeatable) and `run(..., loras=[(name, strength)])`
+chain `LoraLoaderModelOnly` nodes after the diffusion loader. The canvas workflows carry one
+bypassed LoRA node (Ctrl+B to enable). Only `.safetensors` is accepted: `.ckpt` / `.pt` can run code.
 
 ## Pinned versions
 

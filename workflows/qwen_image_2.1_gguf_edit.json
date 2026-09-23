@@ -1,8 +1,8 @@
 {
   "id": "qwen-image-2.1-gguf-edit",
   "revision": 0,
-  "last_node_id": 11,
-  "last_link_id": 12,
+  "last_node_id": 20,
+  "last_link_id": 13,
   "nodes": [
     {
       "id": 1,
@@ -64,7 +64,7 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 1
+          "link": 2
         },
         {
           "name": "device",
@@ -88,7 +88,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            2
+            3
           ],
           "slot_index": 0
         }
@@ -146,7 +146,7 @@
           "name": "CLIP",
           "type": "CLIP",
           "links": [
-            3
+            4
           ],
           "slot_index": 0
         }
@@ -189,8 +189,8 @@
           "name": "VAE",
           "type": "VAE",
           "links": [
-            4,
-            5
+            5,
+            6
           ],
           "slot_index": 0
         }
@@ -220,12 +220,12 @@
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 3
+          "link": 4
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 4,
+          "link": 5,
           "shape": 7
         },
         {
@@ -255,13 +255,13 @@
         {
           "name": "images.image_1",
           "type": "IMAGE",
-          "link": 11,
+          "link": 12,
           "shape": 7
         },
         {
           "name": "images.image_2",
           "type": "IMAGE",
-          "link": 12,
+          "link": 13,
           "shape": 7
         },
         {
@@ -276,7 +276,7 @@
           "name": "positive",
           "type": "CONDITIONING",
           "links": [
-            6
+            7
           ],
           "slot_index": 0
         },
@@ -284,7 +284,7 @@
           "name": "negative",
           "type": "CONDITIONING",
           "links": [
-            7
+            8
           ],
           "slot_index": 0
         },
@@ -292,7 +292,7 @@
           "name": "latent",
           "type": "LATENT",
           "links": [
-            8
+            9
           ],
           "slot_index": 0
         }
@@ -324,22 +324,22 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 2
+          "link": 3
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 6
+          "link": 7
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 7
+          "link": 8
         },
         {
           "name": "latent_image",
           "type": "LATENT",
-          "link": 8
+          "link": 9
         },
         {
           "name": "seed",
@@ -395,7 +395,7 @@
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            9
+            10
           ],
           "slot_index": 0
         }
@@ -431,12 +431,12 @@
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 9
+          "link": 10
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 5
+          "link": 6
         }
       ],
       "outputs": [
@@ -444,7 +444,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            10
+            11
           ],
           "slot_index": 0
         }
@@ -472,7 +472,7 @@
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 10
+          "link": 11
         },
         {
           "name": "filename_prefix",
@@ -492,6 +492,62 @@
       ]
     },
     {
+      "id": 20,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        40,
+        910
+      ],
+      "size": [
+        380,
+        90
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 1
+        },
+        {
+          "name": "lora_name",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "lora_name"
+          }
+        },
+        {
+          "name": "strength_model",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "strength_model"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            2
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "widgets_values": [
+        "",
+        1.0
+      ],
+      "title": "LoRA (bypassed — Ctrl+B to enable)"
+    },
+    {
       "id": 5,
       "type": "MarkdownNote",
       "pos": [
@@ -509,7 +565,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "## Qwen-Image 2.1 — Image edit (GGUF)\n\n- **image_1 is the edit target**; image_2… are references. Mention them in the prompt as `<image1>`, `<image2>`, …\n- **Canvas = image_1 size** (the `latent` output of Text Encode). To force another size, feed an `EmptyLatentImage` close to image_1's resized size instead, or the edit shifts.\n- **resolution** = total pixel budget for the references, aspect kept, multiples of 32. `0` = keep each image's own size; official default 1024; up to 2048.\n- Up to 16 reference inputs; add `LoadImage` nodes and drag them into `images.image_N`.\n- `Qwen Image 2.1 Cache`: `dtype int8` halves the KV cache (edits on tight VRAM); `int4` quarters it, less accurate.\n- cfg 1.0 / euler / simple / 25 steps as for t2i.\n"
+        "## Qwen-Image 2.1 — Image edit (GGUF)\n\n- **image_1 is the edit target**; image_2… are references. Mention them in the prompt as `<image1>`, `<image2>`, …\n- **Canvas = image_1 size** (the `latent` output of Text Encode). To force another size, feed an `EmptyLatentImage` close to image_1's resized size instead, or the edit shifts.\n- **resolution** = total pixel budget for the references, aspect kept, multiples of 32. `0` = keep each image's own size; official default 1024; up to 2048.\n- Up to 16 reference inputs; add `LoadImage` nodes and drag them into `images.image_N`.\n- `Qwen Image 2.1 Cache`: `dtype int8` halves the KV cache (edits on tight VRAM); `int4` quarters it, less accurate.\n- cfg 1.0 / euler / simple / 25 steps as for t2i.\n- LoRA: the purple `LoraLoaderModelOnly` node is bypassed — select it, **Ctrl+B**, pick a Qwen-Image 2.1 LoRA from `models/loras`. Chain more by copying it.\n"
       ],
       "color": "#432",
       "bgcolor": "#653"
@@ -551,7 +607,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            11
+            12
           ],
           "slot_index": 0
         },
@@ -610,7 +666,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            12
+            13
           ],
           "slot_index": 0
         },
@@ -636,12 +692,20 @@
       1,
       1,
       0,
-      9,
+      20,
       0,
       "MODEL"
     ],
     [
       2,
+      20,
+      0,
+      9,
+      0,
+      "MODEL"
+    ],
+    [
+      3,
       9,
       0,
       6,
@@ -649,7 +713,7 @@
       "MODEL"
     ],
     [
-      3,
+      4,
       2,
       0,
       4,
@@ -657,47 +721,47 @@
       "CLIP"
     ],
     [
-      4,
-      3,
-      0,
-      4,
-      1,
-      "VAE"
-    ],
-    [
       5,
       3,
       0,
-      7,
+      4,
       1,
       "VAE"
     ],
     [
       6,
-      4,
+      3,
       0,
-      6,
+      7,
       1,
-      "CONDITIONING"
+      "VAE"
     ],
     [
       7,
       4,
-      1,
+      0,
       6,
-      2,
+      1,
       "CONDITIONING"
     ],
     [
       8,
       4,
-      2,
+      1,
       6,
-      3,
-      "LATENT"
+      2,
+      "CONDITIONING"
     ],
     [
       9,
+      4,
+      2,
+      6,
+      3,
+      "LATENT"
+    ],
+    [
+      10,
       6,
       0,
       7,
@@ -705,23 +769,23 @@
       "LATENT"
     ],
     [
-      10,
+      11,
       7,
       0,
       8,
       0,
-      "IMAGE"
-    ],
-    [
-      11,
-      10,
-      0,
-      4,
-      5,
       "IMAGE"
     ],
     [
       12,
+      10,
+      0,
+      4,
+      5,
+      "IMAGE"
+    ],
+    [
+      13,
       11,
       0,
       4,

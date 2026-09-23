@@ -7,6 +7,7 @@ Text to image:
     python generate.py "..." --count 5                      # 5 images, seeds seed..seed+4
     python generate.py "..." --model qwen-image-2.1-UC-BF16.gguf      # uncensored, unquantized
     python generate.py "..." --model qwen-image-2.1-UC-fp8.safetensors  # safetensors -> UNETLoader
+    python generate.py "..." --lora my_style.safetensors:0.8 --lora other.safetensors  # LoRAs (models/loras)
 
 Image edit (image_1 is the edit target, the rest are references; use <image1>, <image2> in the prompt):
     python generate.py "Keep <image1> unchanged, put the shirt from <image2> on her" --image a.png --image b.png
@@ -16,14 +17,18 @@ Loads workflows/qwen_image_2.1_gguf_{t2i,edit}_api.json, patches the inputs, POS
 /prompt, waits for the job and copies the PNGs to --out. --model picks the diffusion file:
 *.gguf goes through UnetLoaderGGUF, *.safetensors (fp8 / int8 / base bf16) through the
 stock UNETLoader. --count N queues N jobs with consecutive seeds (same VRAM, N x time); if
-some fail, the finished ones are still saved.
+some fail, the finished ones are still saved. Output files carry their seed in the name
+(Qwen_image_2.1_s<seed>_00001_.png). --lora NAME[:STRENGTH] chains LoraLoaderModelOnly
+nodes between the diffusion loader and the sampler (Qwen-Image 2.1 LoRAs only).
 """
 import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 import random
+import re
 import sys
 import time
 import urllib.parse
@@ -161,9 +166,12 @@ def submit_many(wf, seed, count, host=DEFAULT_HOST, out="outputs", timeout=1800,
     is called after each job. If some jobs fail or get cancelled, the rest are still
     collected and a ComfyError carrying the finished files is raised at the end."""
     pids = []
+    prefix = wf["8"]["inputs"]["filename_prefix"]
     for i in range(count):
         w = copy.deepcopy(wf)
-        w["6"]["inputs"]["seed"] = (seed + i) % 2**32
+        s = (seed + i) % 2**32
+        w["6"]["inputs"]["seed"] = s
+        w["8"]["inputs"]["filename_prefix"] = f"{prefix}_s{s}"  # so every file says which seed made it
         pids.append(queue_prompt(w, host))
     files, failed = [], {}
     for i, pid in enumerate(pids):
@@ -184,6 +192,44 @@ def submit_many(wf, seed, count, host=DEFAULT_HOST, out="outputs", timeout=1800,
 
 def _seed(seed):
     return random.randint(0, 2**32 - 1) if seed is None else int(seed)
+
+
+def seed_of(path):
+    """Seed encoded in an output file name by submit_many, or None."""
+    m = re.search(r"_s(\d+)_\d+_\.\w+$", os.path.basename(path))
+    return int(m.group(1)) if m else None
+
+
+def edit_canvas(width, height, resolution):
+    """Size TextEncodeQwenImage21 resizes an image to (and, for image_1, the output canvas):
+    `resolution` > 0 = about resolution² pixels keeping the aspect ratio, 0 = own size;
+    both rounded to multiples of 32 (mirrors comfy_extras/nodes_qwen.py)."""
+    if resolution > 0:
+        ratio = width / height
+        w = round(math.sqrt(resolution * resolution * ratio) / 32) * 32
+        h = round(math.sqrt(resolution * resolution / ratio) / 32) * 32
+    else:
+        w, h = round(width / 32) * 32, round(height / 32) * 32
+    return max(32, w), max(32, h)
+
+
+def apply_loras(wf, loras):
+    """Chain a LoraLoaderModelOnly per (name, strength) after the diffusion loader (node 1)
+    and point everything that used node 1's MODEL at the last one. Empty names and
+    strength 0 are skipped."""
+    loras = [(n, float(st)) for n, st in (loras or []) if n and float(st) != 0.0]
+    if not loras:
+        return []
+    consumers = [(nid, k) for nid, node in wf.items() for k, v in node["inputs"].items() if v == ["1", 0]]
+    prev = ["1", 0]
+    for i, (name, strength) in enumerate(loras):
+        nid = str(21 + i)
+        wf[nid] = {"class_type": "LoraLoaderModelOnly",
+                   "inputs": {"model": prev, "lora_name": name, "strength_model": strength}}
+        prev = [nid, 0]
+    for nid, k in consumers:
+        wf[nid]["inputs"][k] = prev
+    return loras
 
 
 def _submit(wf, seed, count, host, out, timeout, progress):
@@ -207,9 +253,10 @@ def set_model(wf, name):
 
 def run(prompt, negative="", width=1024, height=1024, steps=25, cfg=1.0, seed=None,
         gguf=None, host=DEFAULT_HOST, out="outputs", timeout=1800, clip=None, count=1,
-        model=None, progress=None):
+        model=None, progress=None, loras=None):
     """Returns (files, seed). count > 1 makes `count` images with seeds seed, seed+1, ...
-    model: diffusion file name (*.gguf or *.safetensors); `gguf` is the old name for it."""
+    model: diffusion file name (*.gguf or *.safetensors); `gguf` is the old name for it.
+    loras: [(file in models/loras, strength), ...]."""
     with open(T2I_JSON, encoding="utf-8") as f:
         wf = json.load(f)
     seed = _seed(seed)
@@ -221,7 +268,8 @@ def run(prompt, negative="", width=1024, height=1024, steps=25, cfg=1.0, seed=No
         set_model(wf, model or gguf)
     if clip:
         wf["2"]["inputs"]["clip_name"] = clip
-    print(f">> t2i seed={seed} count={count} {width}x{height} steps={steps} cfg={cfg}")
+    loras = apply_loras(wf, loras)
+    print(f">> t2i seed={seed} count={count} {width}x{height} steps={steps} cfg={cfg} loras={loras}")
     return _submit(wf, seed, count, host, out, timeout, progress), seed
 
 
@@ -229,11 +277,11 @@ def run(prompt, negative="", width=1024, height=1024, steps=25, cfg=1.0, seed=No
 
 def edit(prompt, images, negative="", resolution=0, width=None, height=None, steps=25, cfg=1.0,
          seed=None, gguf=None, clip=None, cache_device="auto", cache_dtype="default",
-         host=DEFAULT_HOST, out="outputs", timeout=1800, count=1, model=None, progress=None):
+         host=DEFAULT_HOST, out="outputs", timeout=1800, count=1, model=None, progress=None, loras=None):
     """images: list of local paths; images[0] is the edit target (canvas size), others are refs.
     resolution: pixel budget for the references (0 = keep own size, 1024 official, up to 2048).
     width/height: force the output canvas instead of following image_1 (keep it close to
-    image_1's resized size or the edit shifts). count / model as in run()."""
+    image_1's resized size or the edit shifts). count / model / loras as in run()."""
     images = [p for p in images if p]
     if not images:
         raise ValueError("image edit needs at least one image (image_1 = edit target)")
@@ -265,7 +313,8 @@ def edit(prompt, images, negative="", resolution=0, width=None, height=None, ste
         set_model(wf, model or gguf)
     if clip:
         wf["2"]["inputs"]["clip_name"] = clip
-    print(f">> edit seed={seed} count={count} images={len(images)} resolution={resolution} "
+    loras = apply_loras(wf, loras)
+    print(f">> edit seed={seed} count={count} images={len(images)} resolution={resolution} loras={loras} "
           f"canvas={'image_1' if not (width and height) else f'{width}x{height}'} steps={steps} cfg={cfg}")
     return _submit(wf, seed, count, host, out, timeout, progress), seed
 
@@ -286,19 +335,25 @@ if __name__ == "__main__":
     ap.add_argument("--model", "--gguf", dest="model",
                     help="diffusion file: qwen-image-2.1-UC-Q8_0.gguf, qwen-image-2.1-UC-fp8.safetensors, ...")
     ap.add_argument("--clip", help="override clip_name, e.g. qwen3vl_8b_bf16.safetensors")
+    ap.add_argument("--lora", action="append", default=[], metavar="NAME[:STRENGTH]",
+                    help="LoRA file in ComfyUI/models/loras, strength default 1.0; repeatable")
     ap.add_argument("--cache-device", default="auto", choices=["auto", "gpu", "cpu", "off"])
     ap.add_argument("--cache-dtype", default="default", choices=["default", "int8", "int4"])
     ap.add_argument("--host", default=DEFAULT_HOST)
     ap.add_argument("--out", default="outputs")
     a = ap.parse_args()
+    loras = []
+    for spec in a.lora:
+        name, _, strength = spec.rpartition(":") if re.search(r":-?[\d.]+$", spec) else (spec, "", "1")
+        loras.append((name, float(strength)))
     try:
         if a.image:
             edit(a.prompt, a.image, a.negative, a.resolution, a.width, a.height, a.steps, a.cfg, a.seed,
                  clip=a.clip, cache_device=a.cache_device, cache_dtype=a.cache_dtype, host=a.host,
-                 out=a.out, count=a.count, model=a.model)
+                 out=a.out, count=a.count, model=a.model, loras=loras)
         else:
             run(a.prompt, a.negative, a.width or 1024, a.height or 1024, a.steps, a.cfg, a.seed,
-                host=a.host, out=a.out, clip=a.clip, count=a.count, model=a.model)
+                host=a.host, out=a.out, clip=a.clip, count=a.count, model=a.model, loras=loras)
     except ComfyError as e:
         if e.files:
             print(">> saved anyway:", ", ".join(e.files))

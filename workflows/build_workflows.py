@@ -11,6 +11,8 @@ the stock UNETLoader for the fp8 / int8_convrot / base bf16 safetensors. generat
 needs the GGUF API files and swaps node 1 by file extension. Edit graph: LoadImage(s) -> TextEncodeQwenImage21
 (images.image_N + vae); its `latent` output (canvas = image_1 size) feeds the KSampler;
 QwenImage21Cache sits between the loader and the sampler to set KV-cache device / precision.
+The UI graphs also carry a bypassed LoraLoaderModelOnly after the loader (Ctrl+B to enable);
+the API graphs don't — generate.apply_loras inserts LoRA nodes on demand.
 """
 import argparse
 import json
@@ -27,7 +29,23 @@ NOTE = """## Qwen-Image 2.1 Uncensored (GGUF)
 - Text encoder: `CLIPLoader` type must be `qwen_image`.
 - Loader: `Unet Loader (GGUF)` from the **leejet** ComfyUI-GGUF fork for *.gguf; the stock `Load Diffusion Model` (UNETLoader) for *.safetensors (UC fp8 / int8_convrot, base bf16).
 - Files: abenzerps/Qwen-Image-2.1-Uncensored-GGUF (`UC` = uncensored; base quants on its `base` branch) and Comfy-Org/Qwen-Image-2.1 (unquantized base) on HF.
+- LoRA: the purple `LoraLoaderModelOnly` node is bypassed — select it, **Ctrl+B**, pick a Qwen-Image 2.1 LoRA from `models/loras`. Chain more by copying it.
 """
+
+
+LORA_NOTE_LINE = ("- LoRA: the purple `LoraLoaderModelOnly` node is bypassed — select it, **Ctrl+B**, pick a "
+                  "Qwen-Image 2.1 LoRA from `models/loras`. Chain more by copying it.\n")
+
+
+def lora_ui(id_, node, inp, out, l_in, l_out, pos):
+    """A bypassed (mode 4) LoraLoaderModelOnly between the diffusion loader and its consumer."""
+    n = node(id_, "LoraLoaderModelOnly", list(pos), [380, 90],
+             [inp("model", "MODEL", l_in),
+              inp("lora_name", "COMBO", None, widget={"name": "lora_name"}),
+              inp("strength_model", "FLOAT", None, widget={"name": "strength_model"})],
+             [out("MODEL", "MODEL", [l_out])], ["", 1.0], "LoRA (bypassed — Ctrl+B to enable)")
+    n["mode"] = 4
+    return n
 
 
 def loader_api(name):
@@ -75,7 +93,8 @@ def build(gguf, text_encoder, vae, width=1024, height=1024, steps=25, cfg=1.0):
         links.append([len(links) + 1, a, aslot, b, bslot, t])
         return len(links)
 
-    l_model = link(1, 0, 6, 0, "MODEL")
+    l_model = link(1, 0, 10, 0, "MODEL")
+    l_lora = link(10, 0, 6, 0, "MODEL")
     l_clip = link(2, 0, 4, 0, "CLIP")
     l_vae = link(3, 0, 7, 1, "VAE")
     l_pos = link(4, 0, 6, 1, "CONDITIONING")
@@ -124,7 +143,7 @@ def build(gguf, text_encoder, vae, width=1024, height=1024, steps=25, cfg=1.0):
               inp("batch_size", "INT", None, widget={"name": "batch_size"})],
              [out("LATENT", "LATENT", [l_lat])], [width, height, 1]),
         node(6, "KSampler", [980, 60], [320, 280],
-             [inp("model", "MODEL", l_model), inp("positive", "CONDITIONING", l_pos),
+             [inp("model", "MODEL", l_lora), inp("positive", "CONDITIONING", l_pos),
               inp("negative", "CONDITIONING", l_neg), inp("latent_image", "LATENT", l_lat),
               inp("seed", "INT", None, widget={"name": "seed"}),
               inp("steps", "INT", None, widget={"name": "steps"}),
@@ -141,11 +160,12 @@ def build(gguf, text_encoder, vae, width=1024, height=1024, steps=25, cfg=1.0):
              [inp("images", "IMAGE", l_img),
               inp("filename_prefix", "STRING", None, widget={"name": "filename_prefix"})],
              [], ["Qwen_image_2.1"]),
-        {"id": 9, "type": "MarkdownNote", "pos": [40, 460], "size": [380, 260],
+        lora_ui(10, node, inp, out, l_model, l_lora, (470, 600)),
+        {"id": 9, "type": "MarkdownNote", "pos": [40, 460], "size": [380, 300],
          "flags": {}, "order": 8, "mode": 0, "inputs": [], "outputs": [], "properties": {},
          "widgets_values": [NOTE], "color": "#432", "bgcolor": "#653"},
     ]
-    ui = {"id": f"qwen-image-2.1-{'gguf' if gguf.endswith('.gguf') else 'safetensors'}-t2i", "revision": 0, "last_node_id": 9,
+    ui = {"id": f"qwen-image-2.1-{'gguf' if gguf.endswith('.gguf') else 'safetensors'}-t2i", "revision": 0, "last_node_id": 10,
           "last_link_id": len(links), "nodes": nodes, "links": links, "groups": [],
           "config": {}, "extra": {"ds": {"scale": 0.8, "offset": [0, 0]}}, "version": 0.4}
     return ui, api
@@ -161,7 +181,7 @@ EDIT_NOTE = """## Qwen-Image 2.1 — Image edit (GGUF)
 - Up to 16 reference inputs; add `LoadImage` nodes and drag them into `images.image_N`.
 - `Qwen Image 2.1 Cache`: `dtype int8` halves the KV cache (edits on tight VRAM); `int4` quarters it, less accurate.
 - cfg 1.0 / euler / simple / 25 steps as for t2i.
-"""
+""" + LORA_NOTE_LINE
 
 
 def build_edit(gguf, text_encoder, vae, steps=25, cfg=1.0, resolution=0, n_images=2,
@@ -211,7 +231,8 @@ def build_edit(gguf, text_encoder, vae, steps=25, cfg=1.0, resolution=0, n_image
     def out(name, t, ls):
         return {"name": name, "type": t, "links": ls, "slot_index": 0}
 
-    l_model = link(1, 0, 9, 0, "MODEL")
+    l_model = link(1, 0, 20, 0, "MODEL")
+    l_lora = link(20, 0, 9, 0, "MODEL")
     l_cached = link(9, 0, 6, 0, "MODEL")
     l_clip = link(2, 0, 4, 0, "CLIP")
     l_vae_enc = link(3, 0, 4, 1, "VAE")
@@ -233,7 +254,7 @@ def build_edit(gguf, text_encoder, vae, steps=25, cfg=1.0, resolution=0, n_image
     nodes = [
         loader_ui(gguf, node, inp, out, l_model),
         node(9, "QwenImage21Cache", [40, 170], [380, 90],
-             [inp("model", "MODEL", l_model), inp("device", "COMBO", None, widget={"name": "device"}),
+             [inp("model", "MODEL", l_lora), inp("device", "COMBO", None, widget={"name": "device"}),
               inp("dtype", "COMBO", None, widget={"name": "dtype"})],
              [out("MODEL", "MODEL", [l_cached])], [cache_device, cache_dtype]),
         node(2, "CLIPLoader", [40, 310], [380, 110],
@@ -266,6 +287,7 @@ def build_edit(gguf, text_encoder, vae, steps=25, cfg=1.0, resolution=0, n_image
              [inp("images", "IMAGE", l_img),
               inp("filename_prefix", "STRING", None, widget={"name": "filename_prefix"})],
              [], ["Qwen_image_2.1_edit"]),
+        lora_ui(20, node, inp, out, l_model, l_lora, (40, 910)),
         {"id": 5, "type": "MarkdownNote", "pos": [40, 570], "size": [380, 300],
          "flags": {}, "order": 4, "mode": 0, "inputs": [], "outputs": [], "properties": {},
          "widgets_values": [EDIT_NOTE], "color": "#432", "bgcolor": "#653"},
@@ -278,7 +300,7 @@ def build_edit(gguf, text_encoder, vae, steps=25, cfg=1.0, resolution=0, n_image
                           [f"image_{i}.png", "image"],
                           "image_1 (edit target)" if i == 1 else f"image_{i} (reference)",
                           ("#232", "#353") if i == 1 else None))
-    ui = {"id": f"qwen-image-2.1-{'gguf' if gguf.endswith('.gguf') else 'safetensors'}-edit", "revision": 0, "last_node_id": 9 + n_images,
+    ui = {"id": f"qwen-image-2.1-{'gguf' if gguf.endswith('.gguf') else 'safetensors'}-edit", "revision": 0, "last_node_id": max(20, 9 + n_images),
           "last_link_id": len(links), "nodes": nodes, "links": links, "groups": [],
           "config": {}, "extra": {"ds": {"scale": 0.7, "offset": [0, 0]}}, "version": 0.4}
     return ui, api

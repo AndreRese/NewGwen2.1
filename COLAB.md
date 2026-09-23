@@ -68,6 +68,15 @@ ComfyUI/models/
 Re-running the cell checks the files against the repo and re-downloads one only if it changed
 upstream.
 
+LoRAs (Qwen-Image 2.1 only, `.safetensors` only) — by URL, into `ComfyUI/models/loras`:
+
+```python
+!python download_models.py --lora-only --lora https://huggingface.co/<user>/<repo>/blob/main/<file>.safetensors
+!python download_models.py --lora-only --lora "https://civitai.com/api/download/models/<id>" --lora-token <API key>
+```
+
+(`--lora-token` can also come from the `CIVITAI_TOKEN` / `HF_TOKEN` environment variables.)
+
 ## Cell 4 – launch ComfyUI + Gradio
 
 ```python
@@ -91,6 +100,15 @@ Starts ComfyUI in the background, then a Gradio app with `share=True`. You get:
     optional custom canvas; *KV cache precision* `int8` halves the edit cache on tight VRAM.
   - *Number of images* on the edit tab too (pick the best take of the same edit). If some
     images of a batch fail or you interrupt it, the finished ones are still shown.
+  - Each result shows its seed. Click one to select it, then **✎ Send to Edit** (becomes image_1
+    of the edit tab), **↺ Use as image_1** (edit a result again) or **Use this seed**.
+  - Edit-tab helpers: the output size image_1 will get at the chosen *resolution*, with warnings
+    when it gets downscaled, goes above native 2K, or a custom canvas has another aspect ratio;
+    ticking *Custom canvas* starts from image_1's size; *Fast* (25 steps · res 1024) and
+    *Quality* (40 steps · image_1 at full size up to 2K) presets.
+  - **LoRAs**: 3 slots with strength (−2…2), applied to both tabs, plus a download-by-URL box
+    (Hugging Face file link or Civitai download link, optional token). *↻ Refresh lists* re-reads
+    models, text encoders and LoRAs from ComfyUI.
   - Diffusion-model dropdown listing every GGUF and safetensors file you downloaded (read live
     from ComfyUI — `.gguf` → `UnetLoaderGGUF`, `.safetensors` → stock `UNETLoader`), text-encoder
     dropdown, galleries, and a **ComfyUI host status** panel (version, GPU memory, queue, canvas
@@ -118,6 +136,7 @@ Logs go to `ComfyUI/comfyui.log` (`!tail -f ComfyUI/comfyui.log`), cloudflared's
 !python generate.py "cinematic portrait, 85mm, film grain" --width 1024 --height 1024 --steps 25
 !python generate.py "..." --count 5 --seed 42                               # seeds 42..46
 !python generate.py "..." --model qwen-image-2.1-UC-BF16.gguf              # unquantized
+!python generate.py "..." --lora my_style.safetensors:0.8                  # LoRA from models/loras (repeatable)
 # image edit: first --image is the target, the rest are references (<image1>, <image2> in the prompt)
 !python generate.py "Keep <image1> unchanged, put the shirt from <image2> on her" \
     --image target.png --image shirt.png --resolution 1024 --cache-dtype int8
@@ -140,6 +159,8 @@ import glob; display(Image(sorted(glob.glob("outputs/*.png"))[-1]))
   `EmptyLatentImage` close to that size if you must force one, or the edit shifts).
   `Qwen Image 2.1 Cache` between loader and sampler sets KV-cache device/precision
   (`int8` for tight VRAM). Prompt with `<image1>`, `<image2>`, …
+- LoRA: both canvas workflows carry a bypassed `LoraLoaderModelOnly` right after the loader —
+  select it, **Ctrl+B**, pick a Qwen-Image 2.1 LoRA; copy it to chain more.
 
 ## Notes
 
@@ -162,5 +183,7 @@ import glob; display(Image(sorted(glob.glob("outputs/*.png"))[-1]))
 - `fp8` gave black images before 2026-09-23 15:53 UTC
   ([discussion #22](https://huggingface.co/abenzerps/Qwen-Image-2.1-Uncensored-GGUF/discussions/22));
   the file was re-uploaded — re-run the download cell.
+- A LoRA with no visible effect was made for another model version — the log says
+  `lora key not loaded`. Only Qwen-Image 2.1 LoRAs work.
 - Colab's proxy URL sometimes 403s after idle — re-run Cell 4 (it won't restart the
   server, just reprints the link) or use `tunnel=True`.
