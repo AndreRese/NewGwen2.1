@@ -10,8 +10,8 @@ Gradio cannot tunnel the ComfyUI canvas itself (websocket + localhost), so this 
 prompt → image UI driving ComfyUI through its HTTP API (generate.run / generate.edit),
 with a status panel that shows the ComfyUI host URL, GPU memory and queue.
 Tabs: Text to Image · Image Edit (image_1 = target, up to 4 refs, <imageN> in the prompt).
-The diffusion-model dropdown lists both GGUF quants (UnetLoaderGGUF) and the unquantized
-safetensors originals (UNETLoader); "Number of images" queues N seeds back to back.
+The diffusion-model dropdown lists every GGUF (UnetLoaderGGUF) and safetensors (UNETLoader)
+file; "Number of images" queues N seeds back to back and keeps the finished ones if some fail.
 """
 import argparse
 import os
@@ -76,8 +76,11 @@ def host_status():
 
 def interrupt():
     """Drop everything still pending (a multi-image batch), then stop the running job."""
-    requests.post(f"{HOST}/queue", json={"clear": True}, timeout=10)
-    requests.post(f"{HOST}/interrupt", timeout=10)
+    try:
+        requests.post(f"{HOST}/queue", json={"clear": True}, timeout=10)
+        requests.post(f"{HOST}/interrupt", timeout=10)
+    except requests.RequestException as e:
+        return f"Could not reach ComfyUI: {e}\n\n" + host_status()
     return "Queue cleared + current job interrupted.\n\n" + host_status()
 
 
@@ -86,6 +89,16 @@ def interrupt():
 def _info(seed, count, extra, t0):
     seeds = f"seed **{seed}**" if count == 1 else f"seeds **{seed}–{(seed + count - 1) % 2**32}**"
     return f"{seeds} · {extra} · {time.time() - t0:.0f}s"
+
+
+def _partial(e, count, extra, t0):
+    """A batch where some images failed: show the finished ones with a warning, or raise
+    if nothing finished."""
+    if not e.files:
+        raise gr.Error(str(e))
+    gr.Warning(str(e).splitlines()[0] + " — see the note under the gallery.")
+    detail = "\n".join(f"- {line}" for line in str(e).splitlines()[1:])
+    return e.files, e.seed, _info(e.seed, count, extra, t0) + f"\n\n**⚠ {len(e.files)} of {count} finished:**\n{detail}"
 
 
 def _progress_cb(progress, count):
@@ -101,14 +114,14 @@ def generate_t2i(prompt, negative, width, height, steps, cfg, seed, randomize, c
     count = int(count)
     progress(0, desc=f"queued ({count})" if count > 1 else "queued")
     t0 = time.time()
+    extra = f"{int(width)}×{int(height)} · {int(steps)} steps · cfg {cfg} · {model}"
     try:
         files, used_seed = run(prompt, negative, int(width), int(height), int(steps), float(cfg),
                                None if randomize else int(seed), model=model or None, clip=clip or None,
                                host=HOST, out=OUT_DIR, count=count, progress=_progress_cb(progress, count))
     except ComfyError as e:
-        raise gr.Error(str(e))
-    return files, used_seed, _info(used_seed, count, f"{len(files)} image(s) · {int(width)}×{int(height)} · "
-                                                     f"{int(steps)} steps · cfg {cfg} · {model}", t0)
+        return _partial(e, count, extra, t0)
+    return files, used_seed, _info(used_seed, count, f"{len(files)} image(s) · {extra}", t0)
 
 
 def generate_edit(prompt, negative, img1, img2, img3, img4, resolution, custom_size, width, height,
@@ -121,6 +134,9 @@ def generate_edit(prompt, negative, img1, img2, img3, img4, resolution, custom_s
     count = int(count)
     progress(0, desc="uploading + queued")
     t0 = time.time()
+    canvas = f"{int(width)}×{int(height)}" if custom_size else "image_1 size"
+    extra = (f"{len(images)} input(s) · res {int(resolution)} · canvas {canvas} · "
+             f"{int(steps)} steps · cfg {cfg} · {model}")
     try:
         files, used_seed = edit(prompt, images, negative, int(resolution),
                                 int(width) if custom_size else None, int(height) if custom_size else None,
@@ -128,11 +144,8 @@ def generate_edit(prompt, negative, img1, img2, img3, img4, resolution, custom_s
                                 model=model or None, clip=clip or None, cache_dtype=cache_dtype,
                                 host=HOST, out=OUT_DIR, count=count, progress=_progress_cb(progress, count))
     except ComfyError as e:
-        raise gr.Error(str(e))
-    canvas = f"{int(width)}×{int(height)}" if custom_size else "image_1 size"
-    return files, used_seed, _info(used_seed, count, f"{len(files)} image(s) · {len(images)} input(s) · "
-                                                     f"res {int(resolution)} · canvas {canvas} · "
-                                                     f"{int(steps)} steps · cfg {cfg} · {model}", t0)
+        return _partial(e, count, extra, t0)
+    return files, used_seed, _info(used_seed, count, f"{len(files)} image(s) · {extra}", t0)
 
 
 # ---- UI -----------------------------------------------------------------------------
@@ -151,7 +164,8 @@ def sampler_controls(default_steps=25):
 def build_ui():
     models = diffusion_choices()
     clips = model_choices("CLIPLoader", "clip_name")
-    default_model = next((m for m in models if "Q4_K_M" in m), models[0] if models else None)
+    default_model = next((m for m in models if "UC-Q4_K_M" in m),
+                         next((m for m in models if "Q4_K_M" in m), models[0] if models else None))
     default_clip = next((c for c in clips if "qwen3vl" in c and "int8" in c), clips[0] if clips else None)
 
     with gr.Blocks(title="Qwen-Image 2.1 (GGUF / original) · ComfyUI") as demo:
@@ -165,7 +179,7 @@ def build_ui():
 
         with gr.Row():
             model = gr.Dropdown(models, value=default_model,
-                                label="Diffusion model (*.gguf = GGUF quant · *.safetensors = original weights)")
+                                label="Diffusion model (UC = uncensored · *.gguf → GGUF loader · *.safetensors → UNETLoader)")
             clip = gr.Dropdown(clips, value=default_clip, label="Text encoder")
 
         with gr.Tabs():

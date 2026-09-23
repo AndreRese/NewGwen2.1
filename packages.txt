@@ -1,1 +1,2 @@
-aria2
+# apt packages installed by setup_colab.sh (one per line). Nothing is needed right now:
+# downloads go through huggingface_hub, not aria2.

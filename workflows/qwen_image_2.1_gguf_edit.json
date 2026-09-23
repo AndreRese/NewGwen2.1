@@ -42,7 +42,7 @@
         "Node name for S&R": "UnetLoaderGGUF"
       },
       "widgets_values": [
-        "qwen-image-2.1-Q4_K_M.gguf"
+        "qwen-image-2.1-UC-Q4_K_M.gguf"
       ],
       "title": "Unet Loader (GGUF)"
     },

@@ -2,13 +2,13 @@
 """Generate the t2i and image-edit workflows in ComfyUI UI format and API format.
 
     python build_workflows.py [--quant Q4_K_M] [--text-encoder qwen3vl_8b_int8_convrot.safetensors]
-                              [--full qwen_image_2.1_bf16.safetensors]
+                              [--safetensors qwen-image-2.1-UC-int8_convrot.safetensors]
 
 The graphs mirror Comfy-Org's official image_qwen_image_2_1_t2i / _image_edit templates
 (which hide everything in a subgraph) but flattened. The *_gguf_* files use UnetLoaderGGUF
-(leejet fork), the *_bf16_* files keep the stock UNETLoader for the unquantized originals
-(qwen_image_2.1_bf16 / _int8_convrot.safetensors); generate.py only needs the GGUF API
-files and swaps node 1 by file extension. Edit graph: LoadImage(s) -> TextEncodeQwenImage21
+(leejet fork) with the uncensored qwen-image-2.1-UC-*.gguf; the *_safetensors_* files keep
+the stock UNETLoader for the fp8 / int8_convrot / base bf16 safetensors. generate.py only
+needs the GGUF API files and swaps node 1 by file extension. Edit graph: LoadImage(s) -> TextEncodeQwenImage21
 (images.image_N + vae); its `latent` output (canvas = image_1 size) feeds the KSampler;
 QwenImage21Cache sits between the loader and the sampler to set KV-cache device / precision.
 """
@@ -25,8 +25,8 @@ NOTE = """## Qwen-Image 2.1 Uncensored (GGUF)
 - **steps**: 25 is fast; the official pipeline uses 40-50 with euler.
 - Native 2K: set 2048x2048 on EmptyLatentImage (multiples of 32).
 - Text encoder: `CLIPLoader` type must be `qwen_image`.
-- Loader: `Unet Loader (GGUF)` from the **leejet** ComfyUI-GGUF fork for *.gguf; the stock `Load Diffusion Model` (UNETLoader) for the original *.safetensors (bf16 / int8_convrot).
-- Files: abenzerps/Qwen-Image-2.1-Uncensored-GGUF (GGUF) and Comfy-Org/Qwen-Image-2.1 (originals) on HF.
+- Loader: `Unet Loader (GGUF)` from the **leejet** ComfyUI-GGUF fork for *.gguf; the stock `Load Diffusion Model` (UNETLoader) for *.safetensors (UC fp8 / int8_convrot, base bf16).
+- Files: abenzerps/Qwen-Image-2.1-Uncensored-GGUF (`UC` = uncensored; base quants on its `base` branch) and Comfy-Org/Qwen-Image-2.1 (unquantized base) on HF.
 """
 
 
@@ -145,7 +145,7 @@ def build(gguf, text_encoder, vae, width=1024, height=1024, steps=25, cfg=1.0):
          "flags": {}, "order": 8, "mode": 0, "inputs": [], "outputs": [], "properties": {},
          "widgets_values": [NOTE], "color": "#432", "bgcolor": "#653"},
     ]
-    ui = {"id": f"qwen-image-2.1-{'gguf' if gguf.endswith('.gguf') else 'full'}-t2i", "revision": 0, "last_node_id": 9,
+    ui = {"id": f"qwen-image-2.1-{'gguf' if gguf.endswith('.gguf') else 'safetensors'}-t2i", "revision": 0, "last_node_id": 9,
           "last_link_id": len(links), "nodes": nodes, "links": links, "groups": [],
           "config": {}, "extra": {"ds": {"scale": 0.8, "offset": [0, 0]}}, "version": 0.4}
     return ui, api
@@ -278,7 +278,7 @@ def build_edit(gguf, text_encoder, vae, steps=25, cfg=1.0, resolution=0, n_image
                           [f"image_{i}.png", "image"],
                           "image_1 (edit target)" if i == 1 else f"image_{i} (reference)",
                           ("#232", "#353") if i == 1 else None))
-    ui = {"id": f"qwen-image-2.1-{'gguf' if gguf.endswith('.gguf') else 'full'}-edit", "revision": 0, "last_node_id": 9 + n_images,
+    ui = {"id": f"qwen-image-2.1-{'gguf' if gguf.endswith('.gguf') else 'safetensors'}-edit", "revision": 0, "last_node_id": 9 + n_images,
           "last_link_id": len(links), "nodes": nodes, "links": links, "groups": [],
           "config": {}, "extra": {"ds": {"scale": 0.7, "offset": [0, 0]}}, "version": 0.4}
     return ui, api
@@ -289,18 +289,19 @@ if __name__ == "__main__":
     ap.add_argument("--quant", default="Q4_K_M")
     ap.add_argument("--text-encoder", default="qwen3vl_8b_int8_convrot.safetensors")
     ap.add_argument("--vae", default="qwen_image_2.1_vae_bf16.safetensors")
-    ap.add_argument("--full", default="qwen_image_2.1_bf16.safetensors",
-                    help="unquantized file for the *_bf16_* canvas workflows (UNETLoader)")
+    ap.add_argument("--safetensors", default="qwen-image-2.1-UC-int8_convrot.safetensors",
+                    help="file for the *_safetensors_* canvas workflows (UNETLoader)")
     a = ap.parse_args()
     here = os.path.dirname(os.path.abspath(__file__))
-    gguf = f"qwen-image-2.1-{a.quant}.gguf"
+    gguf = f"qwen-image-2.1-UC-{a.quant}.gguf"
     ui, api = build(gguf, a.text_encoder, a.vae)
     ui_e, api_e = build_edit(gguf, a.text_encoder, a.vae)
-    ui_f, _ = build(a.full, a.text_encoder, a.vae)
-    ui_fe, _ = build_edit(a.full, a.text_encoder, a.vae)
+    ui_f, _ = build(a.safetensors, a.text_encoder, a.vae)
+    ui_fe, _ = build_edit(a.safetensors, a.text_encoder, a.vae)
     for name, data in (("qwen_image_2.1_gguf_t2i.json", ui), ("qwen_image_2.1_gguf_t2i_api.json", api),
                        ("qwen_image_2.1_gguf_edit.json", ui_e), ("qwen_image_2.1_gguf_edit_api.json", api_e),
-                       ("qwen_image_2.1_bf16_t2i.json", ui_f), ("qwen_image_2.1_bf16_edit.json", ui_fe)):
+                       ("qwen_image_2.1_safetensors_t2i.json", ui_f),
+                       ("qwen_image_2.1_safetensors_edit.json", ui_fe)):
         with open(os.path.join(here, name), "w", encoding="utf-8", newline=chr(10)) as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         print("wrote", name)

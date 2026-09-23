@@ -21,6 +21,7 @@ import urllib.request
 
 PORT = 8188
 LOG = "comfyui.log"
+TUNNEL_LOG = "/tmp/cloudflared.log"
 URLS = {"proxy": None, "tunnel": None}  # filled by launch(), read by app_gradio
 
 
@@ -67,20 +68,36 @@ def colab_proxy_url(port):
         return None
 
 
-def cloudflared(port):
+def wait_tunnel_url(proc, log_path, timeout=60):
+    """Poll cloudflared's log file for the quick-tunnel URL."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            with open(log_path, encoding="utf-8", errors="replace") as f:
+                m = re.search(r"https://[-a-z0-9]+\.trycloudflare\.com", f.read())
+            if m:
+                return m.group(0)
+        except OSError:
+            pass
+        if proc.poll() is not None:
+            return None
+        time.sleep(1)
+    return None
+
+
+def cloudflared(port, timeout=60):
     if not shutil.which("cloudflared"):
         print(">> installing cloudflared")
         deb = "/tmp/cloudflared.deb"
         urllib.request.urlretrieve(
             "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb", deb)
         subprocess.run(["dpkg", "-i", deb], check=True, stdout=subprocess.DEVNULL)
+    # log to a file, not a pipe: nobody reads a pipe after the URL is found, and once its
+    # 64 KB buffer fills cloudflared blocks on logging and the tunnel freezes
+    log = open(TUNNEL_LOG, "w")
     p = subprocess.Popen(["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}"],
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    for line in p.stdout:
-        m = re.search(r"https://[-a-z0-9]+\.trycloudflare\.com", line)
-        if m:
-            return m.group(0)
-    return None
+                         stdout=log, stderr=subprocess.STDOUT)
+    return wait_tunnel_url(p, TUNNEL_LOG, timeout)
 
 
 def stop():
@@ -120,7 +137,7 @@ def launch(comfy_dir="ComfyUI", lowvram=False, tunnel=False, extra=(), restart=F
         print(f"\n>> ComfyUI: http://127.0.0.1:{PORT}\n")
     if tunnel or not url:
         t = URLS["tunnel"] = cloudflared(PORT)
-        print(f">> ComfyUI (cloudflare):   {t}\n" if t else ">> cloudflared failed to give a URL")
+        print(f">> ComfyUI (cloudflare):   {t}\n" if t else f">> cloudflared gave no URL — see {TUNNEL_LOG}")
     return url
 
 

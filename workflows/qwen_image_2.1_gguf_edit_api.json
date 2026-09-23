@@ -2,7 +2,7 @@
   "1": {
     "class_type": "UnetLoaderGGUF",
     "inputs": {
-      "unet_name": "qwen-image-2.1-Q4_K_M.gguf"
+      "unet_name": "qwen-image-2.1-UC-Q4_K_M.gguf"
     }
   },
   "2": {

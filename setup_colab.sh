@@ -1,33 +1,56 @@
 #!/usr/bin/env bash
 # One-shot environment setup for Google Colab.
 #   bash setup_colab.sh [COMFY_DIR]
-# Clones ComfyUI (master — TextEncodeQwenImage21 is only on master, not in a tagged
-# release yet) and the leejet fork of ComfyUI-GGUF, which is the only GGUF loader with
-# Qwen-Image 2.1 support as of 2026-09-21 (city96 upstream has not merged it).
+#   UPDATE_TO_LATEST=1 bash setup_colab.sh     # ComfyUI master + newest loader instead of the pins
+#
+# ComfyUI and the leejet fork of ComfyUI-GGUF (the only GGUF loader with Qwen-Image 2.1
+# support; city96 upstream has not merged it) are pinned to commits known to work together.
+# Unpinned master already broke this setup once (2026-09-21). Bump the pins after testing.
 set -euo pipefail
 
 COMFY_DIR="${1:-ComfyUI}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+COMFY_URL=https://github.com/comfyanonymous/ComfyUI
+COMFY_PIN=b0f4b7b294ce482a2e071d9d762c133d38c7aa07   # master 2026-09-21 (after v0.37.0, Qwen-Image 2.1 nodes)
+GGUF_URL=https://github.com/leejet/ComfyUI-GGUF
+GGUF_PIN=edd981b10e107d3b8f58e16c498f2d08f631bc47    # 2026-09-21 "dequantize every quantized 1D tensor"
+
+if [ "${UPDATE_TO_LATEST:-0}" = "1" ]; then
+  COMFY_REF=master GGUF_REF=main
+  echo ">> UPDATE_TO_LATEST=1: using ComfyUI master + ComfyUI-GGUF main (untested combination)"
+else
+  COMFY_REF=$COMFY_PIN GGUF_REF=$GGUF_PIN
+fi
+
+# shallow checkout of a branch or commit; works on a fresh dir and on an existing clone
+checkout() {  # dir url ref
+  local dir=$1 url=$2 ref=$3
+  if [ ! -d "$dir/.git" ]; then
+    mkdir -p "$dir"
+    git -C "$dir" init -q
+    git -C "$dir" remote add origin "$url"
+  fi
+  git -C "$dir" fetch -q --depth 1 origin "$ref"
+  git -C "$dir" checkout -q --force FETCH_HEAD
+  echo "   $(basename "$dir") @ $(git -C "$dir" rev-parse --short HEAD)"
+}
+
 echo ">> apt packages"
-if [ -f "$HERE/packages.txt" ]; then
-  xargs -a "$HERE/packages.txt" apt-get -qq install -y >/dev/null
+PKGS=$(grep -v '^\s*#' "$HERE/packages.txt" 2>/dev/null | xargs || true)
+if [ -n "$PKGS" ]; then
+  # never fatal: a stale apt index must not abort the whole setup
+  (apt-get -qq update && apt-get -qq install -y $PKGS) >/dev/null 2>&1 || echo "   warning: apt install failed ($PKGS)"
+else
+  echo "   none needed"
 fi
 
 echo ">> ComfyUI -> $COMFY_DIR"
-if [ ! -d "$COMFY_DIR/.git" ]; then
-  git clone -q --depth 1 https://github.com/comfyanonymous/ComfyUI "$COMFY_DIR"
-else
-  git -C "$COMFY_DIR" pull -q --ff-only
-fi
+checkout "$COMFY_DIR" "$COMFY_URL" "$COMFY_REF"
 
 echo ">> ComfyUI-GGUF (leejet fork, Qwen-Image 2.1 support)"
 GGUF_DIR="$COMFY_DIR/custom_nodes/ComfyUI-GGUF"
-if [ ! -d "$GGUF_DIR/.git" ]; then
-  git clone -q --depth 1 https://github.com/leejet/ComfyUI-GGUF "$GGUF_DIR"
-else
-  git -C "$GGUF_DIR" pull -q --ff-only
-fi
+checkout "$GGUF_DIR" "$GGUF_URL" "$GGUF_REF"
 
 echo ">> python deps"
 pip install -q -r "$COMFY_DIR/requirements.txt"
